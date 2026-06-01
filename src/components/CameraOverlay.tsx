@@ -5,6 +5,9 @@ import { type CaptionBgStyle, type CaptionTextEffect } from '../lib/captionStyle
 import { CaptionStylePicker } from './CaptionStylePicker';
 import {
   detectMediaTypeFromFile,
+  getCameraVideoConstraints,
+  isMediaRecorderSupported,
+  isMobileDevice,
   normalizeMimeType,
   pickVideoRecorderMimeType,
 } from '../lib/media';
@@ -100,6 +103,7 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
   const previewVideoRef = useRef<HTMLVideoElement>(null);
   const uploadLockRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const nativeVideoInputRef = useRef<HTMLInputElement>(null);
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordChunksRef = useRef<Blob[]>([]);
@@ -246,25 +250,43 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
     audio.onended = () => setPlayingPreview(null);
   };
 
+  const attachLivePreview = async (mediaStream: MediaStream) => {
+    const el = videoRef.current;
+    if (!el) return;
+    el.srcObject = mediaStream;
+    el.muted = true;
+    el.playsInline = true;
+    try {
+      await el.play();
+    } catch {
+      /* iOS may require user gesture; preview often still works */
+    }
+  };
+
   const startCamera = async () => {
     stopCamera();
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCameraError('Trình duyệt không hỗ trợ camera. Dùng nút thư viện để chọn ảnh/video.');
+      return;
+    }
     try {
-      const constraints: MediaStreamConstraints = {
-        video: {
-          facingMode,
-          width: { ideal: 4096 },
-          height: { ideal: 4096 },
-        },
-        audio: captureMode === 'video',
-      };
+      const video = getCameraVideoConstraints(facingMode);
+      const wantAudio = captureMode === 'video';
 
-      const mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+      let mediaStream: MediaStream;
+      try {
+        mediaStream = await navigator.mediaDevices.getUserMedia({
+          video,
+          audio: wantAudio,
+        });
+      } catch (firstErr) {
+        if (!wantAudio) throw firstErr;
+        mediaStream = await navigator.mediaDevices.getUserMedia({ video, audio: false });
+      }
+
       setStream(mediaStream);
       setCameraError(null);
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = mediaStream;
-      }
+      await attachLivePreview(mediaStream);
 
       // Re-enumerate after permission — browsers often report only 1 camera before getUserMedia
       try {
@@ -276,9 +298,14 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
       }
     } catch (err: any) {
       console.error('Camera access failed:', err);
-      setCameraError(
-        'Could not access camera. Make sure you grant permission, or choose a file from your gallery! 🌸'
-      );
+      const name = err?.name ?? '';
+      if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+        setCameraError('Cần cho phép camera/mic trong Cài đặt trình duyệt, hoặc chọn file từ thư viện.');
+      } else if (name === 'NotFoundError') {
+        setCameraError('Không tìm thấy camera. Thử chọn ảnh/video từ thư viện.');
+      } else {
+        setCameraError('Không mở được camera. Thử thư viện hoặc tải lại trang.');
+      }
     }
   };
 
@@ -312,15 +339,43 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
     setIsRecording(false);
   }, []);
 
+  const waitForVideoFrame = (video: HTMLVideoElement): Promise<void> =>
+    new Promise((resolve) => {
+      if (video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) {
+        resolve();
+        return;
+      }
+      const done = () => {
+        video.removeEventListener('loadeddata', done);
+        video.removeEventListener('loadedmetadata', done);
+        resolve();
+      };
+      video.addEventListener('loadeddata', done, { once: true });
+      video.addEventListener('loadedmetadata', done, { once: true });
+      setTimeout(done, 2500);
+    });
+
+  const triggerNativeVideoCapture = () => {
+    const input = nativeVideoInputRef.current;
+    if (!input) return;
+    input.value = '';
+    input.click();
+  };
+
   const startVideoRecording = () => {
     if (!stream || isRecording) return;
 
+    if (!isMediaRecorderSupported()) {
+      triggerNativeVideoCapture();
+      return;
+    }
+
     const mimeType = pickVideoRecorderMimeType();
-    const blobMime = mimeType ? normalizeMimeType(mimeType) : 'video/webm';
+    const blobMime = mimeType ? normalizeMimeType(mimeType) : isMobileDevice() ? 'video/mp4' : 'video/webm';
 
     recordChunksRef.current = [];
     const recorderOptions: MediaRecorderOptions = {
-      videoBitsPerSecond: 4_000_000,
+      videoBitsPerSecond: isMobileDevice() ? 2_500_000 : 4_000_000,
       audioBitsPerSecond: 128_000,
     };
     if (mimeType && MediaRecorder.isTypeSupported(mimeType)) {
@@ -330,8 +385,10 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
     let recorder: MediaRecorder;
     try {
       recorder = new MediaRecorder(stream, recorderOptions);
-    } catch {
-      recorder = new MediaRecorder(stream);
+    } catch (err) {
+      console.warn('MediaRecorder init failed:', err);
+      triggerNativeVideoCapture();
+      return;
     }
     mediaRecorderRef.current = recorder;
 
@@ -339,11 +396,16 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
       if (e.data.size > 0) recordChunksRef.current.push(e.data);
     };
 
+    recorder.onerror = () => {
+      setCameraError('Lỗi khi quay video. Thử quay bằng camera máy (nút đỏ) hoặc chọn từ thư viện.');
+      setIsRecording(false);
+    };
+
     recorder.onstop = () => {
-      const actualMime = normalizeMimeType(recorder.mimeType || blobMime);
+      const actualMime = normalizeMimeType(recorder.mimeType || blobMime) || blobMime;
       const blob = new Blob(recordChunksRef.current, { type: actualMime });
       if (blob.size < 1000) {
-        setCameraError('Video quá ngắn hoặc lỗi ghi. Giữ nút quay ít nhất 2 giây rồi thử lại.');
+        setCameraError('Video quá ngắn. Giữ nút quay ít nhất 2 giây rồi thử lại.');
         setIsRecording(false);
         return;
       }
@@ -355,7 +417,12 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
       setRecordSeconds(0);
     };
 
-    recorder.start(250);
+    const timesliceMs = isMobileDevice() ? 1000 : 250;
+    try {
+      recorder.start(timesliceMs);
+    } catch {
+      recorder.start();
+    }
     setIsRecording(true);
     setRecordSeconds(0);
 
@@ -370,14 +437,20 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
     }, 1000);
   };
 
-  const capturePhoto = () => {
+  const capturePhoto = async () => {
     if (!videoRef.current) return;
 
     setShowFlash(true);
     setTimeout(() => setShowFlash(false), 150);
 
     const video = videoRef.current;
+    await waitForVideoFrame(video);
+
     const cropSize = Math.min(video.videoWidth, video.videoHeight);
+    if (cropSize <= 0) {
+      setCameraError('Camera chưa sẵn sàng. Đợi 1–2 giây rồi chụp lại.');
+      return;
+    }
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const outputSize = cropSize * dpr;
 
@@ -418,9 +491,10 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
   const handleShutter = () => {
     if (captureMode === 'video') {
       if (isRecording) stopVideoRecording();
+      else if (!stream && isMobileDevice()) triggerNativeVideoCapture();
       else startVideoRecording();
     } else {
-      capturePhoto();
+      void capturePhoto();
     }
   };
 
@@ -428,17 +502,20 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
     fileInputRef.current?.click();
   };
 
+  const applyPickedFile = (file: File) => {
+    const mediaType = detectMediaTypeFromFile(file);
+    setCapturedBlob(file);
+    setPreviewUrl(URL.createObjectURL(file));
+    setPreviewMediaType(mediaType);
+    setCaptureMode(mediaType === 'video' ? 'video' : 'photo');
+    setCameraError(null);
+    stopCamera();
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (files && files.length > 0) {
-      const file = files[0];
-      const mediaType = detectMediaTypeFromFile(file);
-      setCapturedBlob(file);
-      setPreviewUrl(URL.createObjectURL(file));
-      setPreviewMediaType(mediaType);
-      setCaptureMode(mediaType === 'video' ? 'video' : 'photo');
-      stopCamera();
-    }
+    const file = e.target.files?.[0];
+    if (file) applyPickedFile(file);
+    e.target.value = '';
   };
 
   const clearSnapState = useCallback(() => {
@@ -711,6 +788,15 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
             onChange={handleFileChange}
             accept="image/*,video/*"
             className="hidden"
+          />
+          <input
+            type="file"
+            ref={nativeVideoInputRef}
+            onChange={handleFileChange}
+            accept="video/*"
+            capture={facingMode === 'user' ? 'user' : 'environment'}
+            className="hidden"
+            aria-hidden
           />
 
           {/* Bottom — luôn cố định dưới cùng */}

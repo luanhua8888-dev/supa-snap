@@ -12,6 +12,7 @@ import { GalleryThumb } from './components/GalleryThumb';
 import {
   extensionForUpload,
   contentTypeForUpload,
+  ensureBlobMime,
   isStorageMimeError,
   type MediaType,
 } from './lib/media';
@@ -516,7 +517,9 @@ export default function App() {
 
     if (isUploading) return;
 
-    const fingerprint = await blobFingerprint(blob);
+    const uploadBlob = ensureBlobMime(blob, mediaType);
+
+    const fingerprint = await blobFingerprint(uploadBlob);
     if (isDuplicateUpload(fingerprint)) {
       showToast('Snap này vừa đăng rồi — không đăng trùng.', 'info');
       return;
@@ -524,14 +527,14 @@ export default function App() {
 
     setIsUploading(true);
     try {
-      const fileExt = extensionForUpload(blob, mediaType);
+      const fileExt = extensionForUpload(uploadBlob, mediaType);
       const fileName = `${Date.now()}-${Math.floor(Math.random() * 10000)}.${fileExt}`;
       const filePath = `${fileName}`;
 
       const { error: uploadError } = await supabase.storage
         .from('photos')
-        .upload(filePath, blob, {
-          contentType: contentTypeForUpload(blob, mediaType),
+        .upload(filePath, uploadBlob, {
+          contentType: contentTypeForUpload(uploadBlob, mediaType),
           cacheControl: '3600',
           upsert: false,
         });

@@ -1,11 +1,16 @@
 /** Fingerprint blob media to detect duplicate uploads. */
 export async function blobFingerprint(blob: Blob): Promise<string> {
   const head = await blob.slice(0, Math.min(blob.size, 64 * 1024)).arrayBuffer();
-  const digest = await crypto.subtle.digest('SHA-256', head);
-  const hex = Array.from(new Uint8Array(digest))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('')
-    .slice(0, 24);
+  let hex = '';
+  if (typeof crypto !== 'undefined' && crypto.subtle?.digest) {
+    const digest = await crypto.subtle.digest('SHA-256', head);
+    hex = Array.from(new Uint8Array(digest))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('')
+      .slice(0, 24);
+  } else {
+    hex = `${blob.size}-${head.byteLength}`;
+  }
   return `${blob.type || 'bin'}:${blob.size}:${hex}`;
 }
 

@@ -59,8 +59,77 @@ export function detectMediaTypeFromBlob(blob: Blob): MediaType {
   return blob.type.startsWith('video/') ? 'video' : 'image';
 }
 
+const VIDEO_EXTENSIONS = new Set(['mp4', 'webm', 'mov', 'm4v']);
+
+export function fileVideoExtension(file: File): string | null {
+  const ext = file.name.split('.').pop()?.toLowerCase();
+  return ext && VIDEO_EXTENSIONS.has(ext) ? ext : null;
+}
+
 export function detectMediaTypeFromFile(file: File): MediaType {
-  return file.type.startsWith('video/') ? 'video' : 'image';
+  if (file.type.startsWith('video/')) return 'video';
+  if (fileVideoExtension(file)) return 'video';
+  return 'image';
+}
+
+export function isMobileDevice(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  return /iPhone|iPad|iPod|Android|Mobile/i.test(navigator.userAgent);
+}
+
+export function isMediaRecorderSupported(): boolean {
+  if (typeof window === 'undefined' || typeof MediaRecorder === 'undefined') return false;
+  try {
+    if (pickVideoRecorderMimeType()) return true;
+    return typeof MediaRecorder !== 'undefined';
+  } catch {
+    return false;
+  }
+}
+
+/** Mobile-safe camera constraints (4096 ideal often fails on phones). */
+export function getCameraVideoConstraints(facingMode: 'user' | 'environment'): MediaTrackConstraints {
+  if (isMobileDevice()) {
+    return {
+      facingMode,
+      width: { ideal: 1280, max: 1920 },
+      height: { ideal: 1280, max: 1920 },
+    };
+  }
+  return {
+    facingMode,
+    width: { ideal: 1920, max: 4096 },
+    height: { ideal: 1920, max: 4096 },
+  };
+}
+
+/** iOS gallery/camera files often have empty `type` — infer from name. */
+export function mimeTypeFromFile(file: File, mediaType: MediaType): string {
+  const base = normalizeMimeType(file.type);
+  if (mediaType === 'image') {
+    if (IMAGE_MIMES.has(base)) return base;
+    return 'image/jpeg';
+  }
+  if (VIDEO_MIMES.has(base)) return base;
+  const ext = fileVideoExtension(file);
+  if (ext === 'mp4' || ext === 'm4v') return 'video/mp4';
+  if (ext === 'mov') return 'video/quicktime';
+  if (ext === 'webm') return 'video/webm';
+  return isMobileDevice() ? 'video/mp4' : 'video/webm';
+}
+
+/** Ensure blob has a MIME before upload (recorded clips on iOS may omit type). */
+export function ensureBlobMime(blob: Blob, mediaType: MediaType): Blob {
+  if (normalizeMimeType(blob.type)) return blob;
+  const type =
+    blob instanceof File
+      ? mimeTypeFromFile(blob, mediaType)
+      : mediaType === 'video'
+        ? isMobileDevice()
+          ? 'video/mp4'
+          : 'video/webm'
+        : 'image/jpeg';
+  return new Blob([blob], { type });
 }
 
 /** Pick best MediaRecorder mime for this browser (mp4 first — better for iOS + Supabase). */
@@ -87,12 +156,19 @@ export function extensionForUpload(blob: Blob, mediaType: MediaType): string {
     const base = normalizeMimeType(blob.type);
     if (base === 'video/mp4') return 'mp4';
     if (base === 'video/quicktime') return 'mov';
-    return 'webm';
+    if (blob instanceof File) {
+      const ext = fileVideoExtension(blob);
+      if (ext === 'mp4' || ext === 'm4v') return 'mp4';
+      if (ext === 'mov') return 'mov';
+      if (ext === 'webm') return 'webm';
+    }
+    return isMobileDevice() ? 'mp4' : 'webm';
   }
   return 'jpg';
 }
 
 export function contentTypeForUpload(blob: Blob, mediaType: MediaType): string {
+  if (blob instanceof File) return mimeTypeFromFile(blob, mediaType);
   const base = normalizeMimeType(blob.type);
 
   if (mediaType === 'image') {
@@ -101,7 +177,7 @@ export function contentTypeForUpload(blob: Blob, mediaType: MediaType): string {
   }
 
   if (VIDEO_MIMES.has(base)) return base;
-  return 'video/webm';
+  return isMobileDevice() ? 'video/mp4' : 'video/webm';
 }
 
 export function isStorageMimeError(message: string): boolean {
