@@ -1,8 +1,16 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Camera, RefreshCw, Sparkles, Image as ImageIcon, Check, RotateCcw, LayoutGrid, Music, Video } from 'lucide-react';
+import { X, Camera, RefreshCw, Sparkles, Image as ImageIcon, Check, RotateCcw, LayoutGrid, Music, Video, ChevronLeft, ChevronRight } from 'lucide-react';
 import { type CaptionBgStyle, type CaptionTextEffect } from '../lib/captionStyles';
 import { CaptionStylePicker } from './CaptionStylePicker';
+import { StickerPicker } from './StickerPicker';
+import { SnapStickerLayer, StickerSizeControls } from './SnapStickerLayer';
+import { compositeSnapImage } from '../lib/compositeSnap';
+import {
+  type StickerPlacement,
+  isAnimatedStickerSrc,
+  stickersToJson,
+} from '../lib/stickers';
 import {
   detectMediaTypeFromFile,
   getCameraVideoConstraints,
@@ -15,6 +23,28 @@ import type { MediaType } from '../lib/media';
 
 const MAX_VIDEO_SECONDS = 60;
 const JPEG_QUALITY = 1;
+
+type SnapDraft = {
+  id: string;
+  blob: Blob;
+  previewUrl: string;
+  mediaType: MediaType;
+  stickers: StickerPlacement[];
+};
+
+function newDraft(blob: Blob, mediaType: MediaType): SnapDraft {
+  return {
+    id: `draft-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    blob,
+    previewUrl: URL.createObjectURL(blob),
+    mediaType,
+    stickers: [],
+  };
+}
+
+function revokeDrafts(drafts: SnapDraft[]) {
+  drafts.forEach((d) => URL.revokeObjectURL(d.previewUrl));
+}
 
 /**
  * deezerJsonp — queries Deezer Search API via JSONP (no CORS, no proxy, no API key).
@@ -88,7 +118,8 @@ interface CameraOverlayProps {
     captionTextColor?: string | null,
     captionBgStyle?: string | null,
     captionTextEffect?: string | null,
-    captionBgColor?: string | null
+    captionBgColor?: string | null,
+    stickersJson?: string | null
   ) => Promise<void>;
   isUploading: boolean;
 }
@@ -114,9 +145,14 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
   const [hasMultipleCameras, setHasMultipleCameras] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   
-  // Snap workflow states
-  const [capturedBlob, setCapturedBlob] = useState<Blob | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  // Snap workflow — supports multiple images per batch
+  const [drafts, setDrafts] = useState<SnapDraft[]>([]);
+  const [draftIndex, setDraftIndex] = useState(0);
+  const currentDraft = drafts[draftIndex] ?? null;
+  const previewUrl = currentDraft?.previewUrl ?? null;
+  const capturedBlob = currentDraft?.blob ?? null;
+  const previewMediaType = currentDraft?.mediaType ?? 'image';
+  const currentStickers = currentDraft?.stickers ?? [];
   const [caption, setCaption] = useState('');
   const [showFlash, setShowFlash] = useState(false);
   const [showGrid, setShowGrid] = useState(true);
@@ -137,8 +173,41 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
   const [captionBgColor, setCaptionBgColor] = useState('#ec4899');
   const [captionTextEffect, setCaptionTextEffect] = useState<CaptionTextEffect>('none');
   const [captureMode, setCaptureMode] = useState<'photo' | 'video'>('photo');
-  const [previewMediaType, setPreviewMediaType] = useState<MediaType>('image');
   const [isRecording, setIsRecording] = useState(false);
+  const [batchProgress, setBatchProgress] = useState<string | null>(null);
+  const [selectedStickerId, setSelectedStickerId] = useState<string | null>(null);
+  const selectedSticker = currentStickers.find((s) => s.id === selectedStickerId) ?? null;
+
+  const setCurrentStickers = (stickers: StickerPlacement[]) => {
+    setDrafts((prev) =>
+      prev.map((d, i) => (i === draftIndex ? { ...d, stickers } : d))
+    );
+  };
+
+  const addDraft = (blob: Blob, mediaType: MediaType) => {
+    setDrafts((prev) => {
+      revokeDrafts(prev);
+      return [newDraft(blob, mediaType)];
+    });
+    setDraftIndex(0);
+    setSelectedStickerId(null);
+  };
+
+  const addDraftsFromFiles = (files: File[]) => {
+    const items = files.filter((f) => f.size > 0);
+    if (!items.length) return;
+    const created = items.map((f) => newDraft(f, detectMediaTypeFromFile(f)));
+    setDrafts((prev) => {
+      revokeDrafts(prev);
+      return created;
+    });
+    setDraftIndex(0);
+    setSelectedStickerId(null);
+    const hasVideo = created.some((d) => d.mediaType === 'video');
+    if (hasVideo) setCaptureMode('video');
+    setCameraError(null);
+    stopCamera();
+  };
   const [recordSeconds, setRecordSeconds] = useState(0);
 
   // Reset snap state when overlay closes; start camera when it opens
@@ -410,9 +479,7 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
         return;
       }
       setCameraError(null);
-      setCapturedBlob(blob);
-      setPreviewUrl(URL.createObjectURL(blob));
-      setPreviewMediaType('video');
+      addDraft(blob, 'video');
       stopCamera();
       setRecordSeconds(0);
     };
@@ -477,9 +544,7 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
     canvas.toBlob(
       (blob) => {
         if (blob) {
-          setCapturedBlob(blob);
-          setPreviewUrl(URL.createObjectURL(blob));
-          setPreviewMediaType('image');
+          addDraft(blob, 'image');
           stopCamera();
         }
       },
@@ -502,30 +567,21 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
     fileInputRef.current?.click();
   };
 
-  const applyPickedFile = (file: File) => {
-    const mediaType = detectMediaTypeFromFile(file);
-    setCapturedBlob(file);
-    setPreviewUrl(URL.createObjectURL(file));
-    setPreviewMediaType(mediaType);
-    setCaptureMode(mediaType === 'video' ? 'video' : 'photo');
-    setCameraError(null);
-    stopCamera();
-  };
-
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) applyPickedFile(file);
+    const files = e.target.files;
+    if (files?.length) addDraftsFromFiles(Array.from(files));
     e.target.value = '';
   };
 
   const clearSnapState = useCallback(() => {
     stopVideoRecording();
-    setPreviewUrl((prev) => {
-      if (prev) URL.revokeObjectURL(prev);
-      return null;
+    setDrafts((prev) => {
+      revokeDrafts(prev);
+      return [];
     });
-    setCapturedBlob(null);
-    setPreviewMediaType('image');
+    setDraftIndex(0);
+    setBatchProgress(null);
+    setSelectedStickerId(null);
     setCaption('');
     setCaptionTextColor('#ffffff');
     setCaptionBgStyle('dark');
@@ -555,30 +611,59 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
   const canPost =
     !!capturedBlob && capturedBlob.size > 0 && !(previewMediaType === 'video' && capturedBlob.size < 1000);
 
+  const prepareUploadBlob = async (draft: SnapDraft): Promise<{ blob: Blob; stickersJson: string | null }> => {
+    const staticStickers = draft.stickers.filter((s) => !isAnimatedStickerSrc(s.src));
+    const animatedStickers = draft.stickers.filter((s) => isAnimatedStickerSrc(s.src));
+
+    if (draft.mediaType === 'image' && draft.stickers.length > 0) {
+      let blob = draft.blob;
+      if (staticStickers.length > 0) {
+        blob = await compositeSnapImage(blob, staticStickers);
+      }
+      const stickersJson = animatedStickers.length ? stickersToJson(animatedStickers) : null;
+      return { blob, stickersJson };
+    }
+
+    if (draft.mediaType === 'video' && draft.stickers.length > 0) {
+      return { blob: draft.blob, stickersJson: stickersToJson(draft.stickers) };
+    }
+
+    return { blob: draft.blob, stickersJson: null };
+  };
+
   const handleUploadSubmit = async () => {
     if (uploadLockRef.current || isUploading) return;
-    if (!capturedBlob || capturedBlob.size === 0) {
+    if (!drafts.length || !capturedBlob || capturedBlob.size === 0) {
       setCameraError('Chưa có ảnh/video để đăng. Thử chụp hoặc quay lại.');
       return;
     }
     uploadLockRef.current = true;
     try {
-      await onUpload(
-        capturedBlob,
-        caption.trim(),
-        previewMediaType,
-        selectedSong?.title || null,
-        selectedSong?.artist || null,
-        selectedSong?.albumArt || null,
-        selectedSong?.previewUrl || null,
-        captionTextColor,
-        captionBgStyle,
-        captionTextEffect,
-        captionBgStyle === 'custom' ? captionBgColor : null
-      );
+      for (let i = 0; i < drafts.length; i++) {
+        const draft = drafts[i];
+        if (drafts.length > 1) {
+          setBatchProgress(`${i + 1}/${drafts.length}`);
+        }
+        const { blob, stickersJson } = await prepareUploadBlob(draft);
+        await onUpload(
+          blob,
+          caption.trim(),
+          draft.mediaType,
+          selectedSong?.title || null,
+          selectedSong?.artist || null,
+          selectedSong?.albumArt || null,
+          selectedSong?.previewUrl || null,
+          captionTextColor,
+          captionBgStyle,
+          captionTextEffect,
+          captionBgStyle === 'custom' ? captionBgColor : null,
+          stickersJson
+        );
+      }
       clearSnapState();
     } finally {
       uploadLockRef.current = false;
+      setBatchProgress(null);
     }
   };
 
@@ -661,24 +746,37 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
                     className="w-full h-full object-cover"
                   />
                 )
-              ) : cameraError ? (
-                <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-6 space-y-4">
-                  <Camera className="w-12 h-12 text-pink-400 animate-pulse" />
-                  <p className="text-xs text-zinc-400 max-w-[200px] leading-relaxed font-rounded">
-                    {cameraError}
-                  </p>
-                </div>
-              ) : (
-                <video
-                  ref={videoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  className={`w-full h-full object-cover ${
-                    facingMode === 'user' ? 'scale-x-[-1]' : ''
-                  }`}
+              ) : null}
+
+              {previewUrl && (
+                <SnapStickerLayer
+                  stickers={currentStickers}
+                  onChange={setCurrentStickers}
+                  disabled={isUploading}
+                  selectedId={selectedStickerId}
+                  onSelectId={setSelectedStickerId}
                 />
               )}
+
+              {!previewUrl &&
+                (cameraError ? (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-6 space-y-4">
+                    <Camera className="w-12 h-12 text-pink-400 animate-pulse" />
+                    <p className="text-xs text-zinc-400 max-w-[200px] leading-relaxed font-rounded">
+                      {cameraError}
+                    </p>
+                  </div>
+                ) : (
+                  <video
+                    ref={videoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className={`w-full h-full object-cover ${
+                      facingMode === 'user' ? 'scale-x-[-1]' : ''
+                    }`}
+                  />
+                ))}
 
               {/* Grid Lines Overlay */}
               {showGrid && !previewUrl && (
@@ -746,9 +844,77 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
               )}
             </div>
 
+            {previewUrl && selectedSticker && (
+              <StickerSizeControls
+                sticker={selectedSticker}
+                disabled={isUploading}
+                onScaleChange={(scale) =>
+                  setCurrentStickers(
+                    currentStickers.map((s) =>
+                      s.id === selectedSticker.id ? { ...s, scale } : s
+                    )
+                  )
+                }
+              />
+            )}
+
             {/* Caption + Styling — shown after capture */}
+            {previewUrl && drafts.length > 1 && (
+              <div className="w-full max-w-[370px] mt-3 flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={draftIndex <= 0 || isUploading}
+                  onClick={() => setDraftIndex((i) => Math.max(0, i - 1))}
+                  className="p-2 rounded-xl bg-white/10 border border-white/15 disabled:opacity-30 cursor-pointer"
+                  aria-label="Ảnh trước"
+                >
+                  <ChevronLeft className="w-4 h-4 text-white" />
+                </button>
+                <div className="flex-1 overflow-x-auto no-scrollbar flex gap-1.5 justify-center">
+                  {drafts.map((d, i) => (
+                    <button
+                      key={d.id}
+                      type="button"
+                      onClick={() => {
+                        setDraftIndex(i);
+                        setSelectedStickerId(null);
+                      }}
+                      className={`shrink-0 w-11 h-11 rounded-lg overflow-hidden border-2 cursor-pointer ${
+                        i === draftIndex ? 'border-pink-400 ring-2 ring-pink-400/40' : 'border-white/20'
+                      }`}
+                    >
+                      {d.mediaType === 'video' ? (
+                        <video src={d.previewUrl} className="w-full h-full object-cover" muted />
+                      ) : (
+                        <img src={d.previewUrl} alt="" className="w-full h-full object-cover" />
+                      )}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  disabled={draftIndex >= drafts.length - 1 || isUploading}
+                  onClick={() => setDraftIndex((i) => Math.min(drafts.length - 1, i + 1))}
+                  className="p-2 rounded-xl bg-white/10 border border-white/15 disabled:opacity-30 cursor-pointer"
+                  aria-label="Ảnh sau"
+                >
+                  <ChevronRight className="w-4 h-4 text-white" />
+                </button>
+              </div>
+            )}
+
             {previewUrl && (
               <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
+                <StickerPicker
+                  stickers={currentStickers}
+                  onAdd={(s) => setCurrentStickers([...currentStickers, s])}
+                  disabled={isUploading}
+                />
+                {previewMediaType === 'video' && (
+                  <p className="text-[9px] text-zinc-500 text-center mt-1 max-w-[370px]">
+                    GIF/sticker trên video hiển thị khi xem snap.
+                  </p>
+                )}
                 <CaptionStylePicker
                   compact
                   caption={caption}
@@ -787,6 +953,7 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
             ref={fileInputRef}
             onChange={handleFileChange}
             accept="image/*,video/*"
+            multiple
             className="hidden"
           />
           <input
@@ -855,11 +1022,18 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
                   className="flex-1 min-h-[44px] max-h-[44px] rounded-xl font-rounded font-extrabold text-sm flex items-center justify-center gap-2 cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed bg-gradient-to-br from-pink-500 via-rose-500 to-violet-600 text-white shadow-[0_4px_20px_rgba(236,72,153,0.45)] border border-pink-300/25 active:scale-[0.98] transition-transform"
                 >
                   {isUploading ? (
-                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <div className="flex items-center gap-2">
+                      <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      {batchProgress && (
+                        <span className="text-xs opacity-90">{batchProgress}</span>
+                      )}
+                    </div>
                   ) : (
                     <>
                       <Check className="w-5 h-5 shrink-0" />
-                      <span>Đăng Snap</span>
+                      <span>
+                        {drafts.length > 1 ? `Đăng tất cả (${drafts.length})` : 'Đăng Snap'}
+                      </span>
                     </>
                   )}
                 </motion.button>

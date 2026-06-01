@@ -1,7 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Smile, Sparkles, Play, Music, Trash2, MoreHorizontal } from 'lucide-react';
-import { resolveCaptionBackground, getCaptionTextEffectClass } from '../lib/captionStyles';
+import {
+  resolveCaptionBackground,
+  resolveCaptionTextStyle,
+  getCaptionTextEffectClass,
+  needsMarqueeWrapper,
+} from '../lib/captionStyles';
+import { SnapStickersDisplay } from './SnapStickersDisplay';
 import { isVideoMedia } from '../lib/media';
 import { isSnapMusicPlaying, playSnapMusic, stopSnapMusic, subscribeSnapMusic } from '../lib/snapMusic';
 import { SnapVideo } from './SnapVideo';
@@ -33,6 +39,7 @@ export interface PhotoData {
   caption_bg_style?: string | null;
   caption_text_effect?: string | null;
   caption_bg_color?: string | null;
+  stickers_json?: string | null;
   media_type?: string | null;
 }
 
@@ -349,12 +356,23 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({
 
       {/* Caption above media — feed / Threads only */}
       {!isDetail && photo.caption && (
-        <p
-          className={`text-[15px] leading-snug text-slate-800 dark:text-threads-text mb-2.5 pl-[2.75rem] ${getCaptionTextEffectClass(photo.caption_text_effect)}`}
-          style={{ color: photo.caption_text_color || undefined }}
-        >
-          {photo.caption}
-        </p>
+        needsMarqueeWrapper(photo.caption_text_effect) ? (
+          <div className="caption-marquee-wrap mb-2.5 pl-[2.75rem] max-w-[calc(100%-2.75rem)]">
+            <p
+              className={`text-[15px] leading-snug text-slate-800 dark:text-threads-text ${getCaptionTextEffectClass(photo.caption_text_effect)}`}
+              style={resolveCaptionTextStyle(photo.caption_text_color)}
+            >
+              {photo.caption}
+            </p>
+          </div>
+        ) : (
+          <p
+            className={`text-[15px] leading-snug text-slate-800 dark:text-threads-text mb-2.5 pl-[2.75rem] ${getCaptionTextEffectClass(photo.caption_text_effect)}`}
+            style={resolveCaptionTextStyle(photo.caption_text_color)}
+          >
+            {photo.caption}
+          </p>
+        )
       )}
 
       {/* Main media */}
@@ -362,8 +380,8 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({
         onClick={isVideoMedia(photo) ? undefined : handleImageClick}
         className={
           isDetail
-            ? 'relative w-full aspect-square rounded-[2rem] overflow-hidden cursor-pointer select-none bg-slate-50 dark:bg-zinc-800/60 shadow-inner group'
-            : 'relative w-full aspect-square rounded-xl overflow-hidden cursor-pointer select-none bg-slate-100 dark:bg-threads-surface group ml-[2.75rem] max-w-[calc(100%-2.75rem)]'
+            ? 'relative w-full aspect-square rounded-[2rem] overflow-hidden cursor-pointer select-none bg-slate-50 dark:bg-zinc-800/60 shadow-inner group [container-type:size]'
+            : 'relative w-full aspect-square rounded-xl overflow-hidden cursor-pointer select-none bg-slate-100 dark:bg-threads-surface group ml-[2.75rem] max-w-[calc(100%-2.75rem)] [container-type:size]'
         }
       >
         {/* Blur-up Placeholder */}
@@ -404,6 +422,8 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({
             isDetail ? 'rounded-[2rem]' : 'rounded-xl'
           }`}
         />
+
+        <SnapStickersDisplay json={photo.stickers_json} />
 
         {/* Floating Sound Widget overlay (Spotify style) */}
         {photo.song_title && (
@@ -526,18 +546,27 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({
         {isDetail &&
           photo.caption &&
           (() => {
-            const bgStyle: React.CSSProperties = {
-              ...resolveCaptionBackground(photo.caption_bg_style, photo.caption_bg_color),
-              color: photo.caption_text_color || '#ffffff',
-            };
+            const bgStyle = resolveCaptionBackground(photo.caption_bg_style, photo.caption_bg_color);
+            const textStyle = resolveCaptionTextStyle(photo.caption_text_color);
             const fxClass = getCaptionTextEffectClass(photo.caption_text_effect);
             return (
               <div
                 className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 max-w-[85%] w-auto backdrop-blur-md border border-white/10 px-3.5 py-1.5 rounded-2xl shadow-lg text-center pointer-events-none select-none"
                 style={bgStyle}
               >
-                <p className={`text-[11px] font-extrabold font-rounded leading-normal break-words ${fxClass}`}>
-                  {photo.caption}
+                <p
+                  className={`text-[11px] font-extrabold font-rounded leading-normal break-words ${fxClass} ${
+                    needsMarqueeWrapper(photo.caption_text_effect) ? 'caption-fx-marquee block' : ''
+                  }`}
+                  style={textStyle}
+                >
+                  {needsMarqueeWrapper(photo.caption_text_effect) ? (
+                    <span className="caption-marquee-wrap block overflow-hidden">
+                      {photo.caption}
+                    </span>
+                  ) : (
+                    photo.caption
+                  )}
                 </p>
               </div>
             );

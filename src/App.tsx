@@ -506,7 +506,8 @@ export default function App() {
     captionTextColor?: string | null,
     captionBgStyle?: string | null,
     captionTextEffect?: string | null,
-    captionBgColor?: string | null
+    captionBgColor?: string | null,
+    stickersJson?: string | null
   ) => {
     if (!sessionUser) {
       showToast('Log in first to upload snaps! 🌸', 'error');
@@ -563,6 +564,7 @@ export default function App() {
       if (captionBgStyle) row.caption_bg_style = captionBgStyle;
       if (captionTextEffect) row.caption_text_effect = captionTextEffect;
       if (captionBgColor) row.caption_bg_color = captionBgColor;
+      if (stickersJson) row.stickers_json = stickersJson;
 
       const { error: insertError } = await supabase.from('photos').insert([row]);
 

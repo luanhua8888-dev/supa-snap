@@ -21,6 +21,7 @@ alter table public.photos add column if not exists caption_bg_style text;
 alter table public.photos add column if not exists caption_text_effect text;
 alter table public.photos add column if not exists media_type text default 'image';
 alter table public.photos add column if not exists caption_bg_color text;
+alter table public.photos add column if not exists stickers_json text;
 
 -- User profiles (username login + admin flag)
 create table if not exists public.profiles (
