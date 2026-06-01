@@ -9,7 +9,6 @@ import {
   pickVideoRecorderMimeType,
 } from '../lib/media';
 import type { MediaType } from '../lib/media';
-import { SnapVideo } from './SnapVideo';
 
 const MAX_VIDEO_SECONDS = 60;
 const JPEG_QUALITY = 1;
@@ -98,6 +97,8 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
   isUploading,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const previewVideoRef = useRef<HTMLVideoElement>(null);
+  const uploadLockRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -301,6 +302,11 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
       recordTimerRef.current = null;
     }
     if (mediaRecorderRef.current?.state === 'recording') {
+      try {
+        mediaRecorderRef.current.requestData();
+      } catch {
+        /* ignore */
+      }
       mediaRecorderRef.current.stop();
     }
     setIsRecording(false);
@@ -310,14 +316,23 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
     if (!stream || isRecording) return;
 
     const mimeType = pickVideoRecorderMimeType();
-    const blobMime = normalizeMimeType(mimeType);
+    const blobMime = mimeType ? normalizeMimeType(mimeType) : 'video/webm';
 
     recordChunksRef.current = [];
-    const recorder = new MediaRecorder(stream, {
-      mimeType,
-      videoBitsPerSecond: 12_000_000,
-      audioBitsPerSecond: 192_000,
-    });
+    const recorderOptions: MediaRecorderOptions = {
+      videoBitsPerSecond: 4_000_000,
+      audioBitsPerSecond: 128_000,
+    };
+    if (mimeType && MediaRecorder.isTypeSupported(mimeType)) {
+      recorderOptions.mimeType = mimeType;
+    }
+
+    let recorder: MediaRecorder;
+    try {
+      recorder = new MediaRecorder(stream, recorderOptions);
+    } catch {
+      recorder = new MediaRecorder(stream);
+    }
     mediaRecorderRef.current = recorder;
 
     recorder.ondataavailable = (e) => {
@@ -325,7 +340,14 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
     };
 
     recorder.onstop = () => {
-      const blob = new Blob(recordChunksRef.current, { type: blobMime });
+      const actualMime = normalizeMimeType(recorder.mimeType || blobMime);
+      const blob = new Blob(recordChunksRef.current, { type: actualMime });
+      if (blob.size < 1000) {
+        setCameraError('Video quá ngắn hoặc lỗi ghi. Giữ nút quay ít nhất 2 giây rồi thử lại.');
+        setIsRecording(false);
+        return;
+      }
+      setCameraError(null);
       setCapturedBlob(blob);
       setPreviewUrl(URL.createObjectURL(blob));
       setPreviewMediaType('video');
@@ -333,7 +355,7 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
       setRecordSeconds(0);
     };
 
-    recorder.start(200);
+    recorder.start(250);
     setIsRecording(true);
     setRecordSeconds(0);
 
@@ -443,22 +465,44 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
     startCamera();
   };
 
+  useEffect(() => {
+    const v = previewVideoRef.current;
+    if (!previewUrl || previewMediaType !== 'video' || !v) return;
+    v.muted = true;
+    v.playsInline = true;
+    const play = () => v.play().catch(() => undefined);
+    if (v.readyState >= 2) play();
+    else v.addEventListener('loadeddata', play, { once: true });
+  }, [previewUrl, previewMediaType]);
+
+  const canPost =
+    !!capturedBlob && capturedBlob.size > 0 && !(previewMediaType === 'video' && capturedBlob.size < 1000);
+
   const handleUploadSubmit = async () => {
-    if (!capturedBlob) return;
-    await onUpload(
-      capturedBlob,
-      caption.trim(),
-      previewMediaType,
-      selectedSong?.title || null,
-      selectedSong?.artist || null,
-      selectedSong?.albumArt || null,
-      selectedSong?.previewUrl || null,
-      captionTextColor,
-      captionBgStyle,
-      captionTextEffect,
-      captionBgStyle === 'custom' ? captionBgColor : null
-    );
-    clearSnapState();
+    if (uploadLockRef.current || isUploading) return;
+    if (!capturedBlob || capturedBlob.size === 0) {
+      setCameraError('Chưa có ảnh/video để đăng. Thử chụp hoặc quay lại.');
+      return;
+    }
+    uploadLockRef.current = true;
+    try {
+      await onUpload(
+        capturedBlob,
+        caption.trim(),
+        previewMediaType,
+        selectedSong?.title || null,
+        selectedSong?.artist || null,
+        selectedSong?.albumArt || null,
+        selectedSong?.previewUrl || null,
+        captionTextColor,
+        captionBgStyle,
+        captionTextEffect,
+        captionBgStyle === 'custom' ? captionBgColor : null
+      );
+      clearSnapState();
+    } finally {
+      uploadLockRef.current = false;
+    }
   };
 
   const handleClose = () => {
@@ -476,10 +520,10 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
           animate={{ y: 0 }}
           exit={{ y: '100%' }}
           transition={{ type: 'spring', damping: 25, stiffness: 220 }}
-          className="absolute inset-0 z-50 bg-[#090708] flex flex-col overflow-hidden"
+          className="absolute inset-0 z-50 bg-brand flex flex-col overflow-hidden min-h-0"
         >
           {/* Top Bar Header */}
-          <div className="flex items-center justify-between p-4 z-10 text-white flex-shrink-0">
+          <div className="flex items-center justify-between px-4 py-3 z-10 text-white flex-shrink-0">
             <motion.button
               whileHover={{ scale: 1.08 }}
               whileTap={{ scale: 0.92 }}
@@ -498,8 +542,9 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
             <div className="w-10" />
           </div>
 
-          {/* Main Visual Viewfinder Area */}
-          <div className="relative flex-1 flex flex-col items-center justify-center bg-[#090708] px-4 pb-2">
+          {/* Scrollable body — tránh đẩy nút Đăng ra ngoài màn hình */}
+          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden no-scrollbar">
+          <div className="relative flex flex-col items-center bg-brand px-4 py-2">
             {/* Flash Effect */}
             <AnimatePresence>
               {showFlash && (
@@ -513,14 +558,24 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
             </AnimatePresence>
 
             {/* Viewfinder Aspect Wrapper */}
-            <div className="relative w-full aspect-square rounded-[2.5rem] overflow-hidden border-2 border-white/10 shadow-2xl bg-black max-w-[370px]">
+            <div
+              className={`relative w-full aspect-square rounded-[2rem] overflow-hidden border-2 border-white/10 shadow-2xl bg-zinc-900 shrink-0 ${
+                previewUrl ? 'max-w-[min(280px,88vw)]' : 'max-w-[min(340px,92vw)]'
+              }`}
+            >
               
               {previewUrl ? (
                 previewMediaType === 'video' ? (
-                  <SnapVideo
+                  <video
+                    key={previewUrl}
+                    ref={previewVideoRef}
                     src={previewUrl}
+                    className="w-full h-full object-cover bg-zinc-900"
+                    playsInline
+                    muted
+                    loop
                     autoPlay
-                    className="bg-black"
+                    preload="auto"
                   />
                 ) : (
                   <img
@@ -618,6 +673,7 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
             {previewUrl && (
               <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
                 <CaptionStylePicker
+                  compact
                   caption={caption}
                   onCaptionChange={setCaption}
                   captionTextColor={captionTextColor}
@@ -646,6 +702,7 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
               </motion.div>
             )}
           </div>
+          </div>
 
           {/* Hidden Gallery Input */}
           <input
@@ -656,8 +713,8 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
             className="hidden"
           />
 
-          {/* Bottom Shutter & Action Controls */}
-          <div className="p-6 pb-8 z-10 bg-[#090708] border-t border-white/5 flex-shrink-0">
+          {/* Bottom — luôn cố định dưới cùng */}
+          <div className="px-4 pt-3 pb-6 z-20 bg-brand/95 backdrop-blur-md border-t border-white/10 flex-shrink-0 safe-area-pb">
             {!previewUrl && !cameraError && (
               <div className="flex justify-center mb-4">
                 <div className="flex p-1 rounded-2xl bg-white/8 border border-white/10">
@@ -692,14 +749,13 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
             )}
 
             {previewUrl ? (
-              <div className="flex items-center gap-3 max-w-[370px] mx-auto">
+              <div className="flex items-center gap-2.5 w-full max-w-[370px] mx-auto">
                 <motion.button
                   id="camera-retake-btn"
-                  whileHover={{ scale: 1.03 }}
                   whileTap={{ scale: 0.97 }}
                   onClick={resetCameraState}
                   disabled={isUploading}
-                  className="shrink-0 w-12 h-12 bg-white/8 hover:bg-white/12 rounded-2xl text-white border border-white/10 flex items-center justify-center cursor-pointer disabled:opacity-50"
+                  className="shrink-0 w-11 h-11 bg-white/10 hover:bg-white/15 rounded-xl text-white border border-white/15 flex items-center justify-center cursor-pointer disabled:opacity-50"
                   title="Chụp lại"
                 >
                   <RotateCcw className="w-5 h-5 text-zinc-300" />
@@ -707,18 +763,17 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
 
                 <motion.button
                   id="camera-post-btn"
-                  whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
                   onClick={handleUploadSubmit}
-                  disabled={isUploading}
-                  className="shimmer-btn flex-1 h-12 bg-gradient-to-r from-pink-500 to-rose-400 text-white font-rounded font-extrabold text-sm rounded-2xl shadow-cute flex items-center justify-center gap-2 cursor-pointer disabled:opacity-70"
+                  disabled={isUploading || !canPost}
+                  className="flex-1 min-h-[44px] max-h-[44px] rounded-xl font-rounded font-extrabold text-sm flex items-center justify-center gap-2 cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed bg-gradient-to-br from-pink-500 via-rose-500 to-violet-600 text-white shadow-[0_4px_20px_rgba(236,72,153,0.45)] border border-pink-300/25 active:scale-[0.98] transition-transform"
                 >
                   {isUploading ? (
                     <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
                   ) : (
                     <>
-                      <Check className="w-5 h-5" />
-                      <span>Đăng Snap 🚀</span>
+                      <Check className="w-5 h-5 shrink-0" />
+                      <span>Đăng Snap</span>
                     </>
                   )}
                 </motion.button>

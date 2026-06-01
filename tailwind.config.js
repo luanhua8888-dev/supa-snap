@@ -8,6 +8,21 @@ export default {
   theme: {
     extend: {
       colors: {
+        brand: {
+          DEFAULT: '#152238',
+          light: '#1e2f4a',
+          dark: '#0f1a2e',
+          muted: '#243552',
+        },
+        threads: {
+          bg: '#101010',
+          surface: '#181818',
+          elevated: '#1c1c1c',
+          border: '#2f2f2f',
+          muted: '#777777',
+          text: '#f5f5f5',
+          hover: '#262626',
+        },
         pastel: {
           pink: {
             50: '#fff5f7',

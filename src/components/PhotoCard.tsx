@@ -1,9 +1,11 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Smile, Sparkles, Play, Music, Trash2 } from 'lucide-react';
+import { Smile, Sparkles, Play, Music, Trash2, MoreHorizontal } from 'lucide-react';
 import { resolveCaptionBackground, getCaptionTextEffectClass } from '../lib/captionStyles';
 import { isVideoMedia } from '../lib/media';
+import { isSnapMusicPlaying, playSnapMusic, stopSnapMusic, subscribeSnapMusic } from '../lib/snapMusic';
 import { SnapVideo } from './SnapVideo';
+import { DetailVideoPlayer } from './DetailVideoPlayer';
 import { CommentSection } from './CommentSection';
 import type { Comment } from '../types/comment';
 
@@ -46,6 +48,10 @@ interface PhotoCardProps {
   onReactComment?: (photoId: string, commentId: string, emoji: string) => Promise<void>;
   isAdmin?: boolean;
   onRequestDelete?: (photoId: string) => void;
+  /** Skip card's own entrance when parent handles feed cinematic */
+  skipFeedEntrance?: boolean;
+  /** feed = Threads list; detail = lightbox / Locket card cũ */
+  variant?: 'feed' | 'detail';
 }
 
 interface FloatingReaction {
@@ -78,7 +84,10 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({
   onReactComment,
   isAdmin = false,
   onRequestDelete,
+  skipFeedEntrance = false,
+  variant = 'feed',
 }) => {
+  const isDetail = variant === 'detail';
   const [isLoaded, setIsLoaded] = useState(false);
   const [lastClickTime, setLastClickTime] = useState(0);
   const [floatingReactions, setFloatingReactions] = useState<FloatingReaction[]>([]);
@@ -87,7 +96,8 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({
   // Music State
   const [isPlaying, setIsPlaying] = useState(false);
   const [floatingNotes, setFloatingNotes] = useState<FloatingNote[]>([]);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [musicError, setMusicError] = useState(false);
+  const [musicLoading, setMusicLoading] = useState(false);
 
   // Group reactions by emoji for rendering counts, and keep lists of users
   const reactionData = photo.reactions.reduce((acc, curr) => {
@@ -106,49 +116,34 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({
     return photo.reactions.some(r => r.username === currentUser && r.emoji === emoji);
   };
 
-  // Setup audio player
   useEffect(() => {
-    if (!photo.song_preview_url) return;
+    setMusicError(false);
+    return subscribeSnapMusic(setIsPlaying);
+  }, []);
 
-    // Deezer preview URLs are CORS-friendly — no proxy needed
-    const audio = new Audio(photo.song_preview_url);
-    audio.loop = true;
-    audio.volume = 0.45;
-    audio.onpause = () => setIsPlaying(false);
-    audio.onplay  = () => setIsPlaying(true);
-    audioRef.current = audio;
+  useEffect(() => {
+    setMusicError(false);
+    setIsPlaying(false);
+  }, [photo.id]);
 
-    // Auto-play when opened in detail/lightbox view
-    if (autoPlay) {
-      const playTimer = setTimeout(() => {
-        audio.play().catch(e => console.warn('Auto-play blocked:', e));
-      }, 300);
-      return () => {
-        clearTimeout(playTimer);
-        audio.pause();
-        audioRef.current = null;
-      };
+  const handleMusicToggle = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (musicLoading || !photo.song_title) return;
+
+    if (isSnapMusicPlaying()) {
+      stopSnapMusic();
+      setMusicError(false);
+      return;
     }
 
-    return () => {
-      audio.pause();
-      audioRef.current = null;
-    };
-  }, [photo.song_preview_url, autoPlay]);
-
-  // Sync state with HTML5 audio
-  useEffect(() => {
-    if (!audioRef.current) return;
-    
-    if (isPlaying) {
-      audioRef.current.play().catch(err => {
-        console.error('Audio playback failed:', err);
-        setIsPlaying(false);
-      });
-    } else {
-      audioRef.current.pause();
-    }
-  }, [isPlaying]);
+    setMusicLoading(true);
+    setMusicError(false);
+    void playSnapMusic(photo.song_preview_url, photo.song_title, photo.song_artist).then((ok) => {
+      setMusicLoading(false);
+      setMusicError(!ok);
+    });
+  };
 
   // Spawns floating music notes when song is playing
   useEffect(() => {
@@ -263,11 +258,15 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 20 }}
+      initial={skipFeedEntrance ? false : { opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -20 }}
       transition={{ type: 'spring', damping: 22, stiffness: 120 }}
-      className="w-full max-w-sm mx-auto mb-6 bg-white dark:bg-zinc-900 rounded-[2.5rem] p-4 shadow-cute dark:shadow-cute-dark border border-pink-100/30 dark:border-zinc-800/40 relative overflow-hidden transition-all duration-300"
+      className={
+        isDetail
+          ? 'w-full max-w-sm mx-auto mb-0 bg-white dark:bg-brand-light rounded-[2.5rem] p-4 shadow-cute dark:shadow-cute-dark border border-pink-100/30 dark:border-brand-muted/50 relative overflow-hidden'
+          : 'w-full max-w-none mx-0 px-3 sm:px-4 py-4 bg-white dark:bg-threads-bg border-b border-rose-100/30 dark:border-threads-border relative overflow-hidden'
+      }
     >
       {/* Dynamic Background Aurora Glow if music is playing */}
       <AnimatePresence>
@@ -281,23 +280,39 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({
         )}
       </AnimatePresence>
 
-      {/* User Header */}
-      <div className="flex items-center justify-between mb-3 px-1.5">
-        <div className="flex items-center space-x-2.5">
-          <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-pink-300 to-rose-200 dark:from-pink-600 dark:to-purple-500 flex items-center justify-center font-extrabold text-xs text-slate-700 dark:text-pink-100 font-rounded shadow-sm border border-white/20">
+      {/* User header */}
+      <div className={`flex items-center justify-between ${isDetail ? 'mb-3 px-1.5' : 'mb-2'}`}>
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div
+            className={
+              isDetail
+                ? 'w-9 h-9 rounded-full bg-gradient-to-tr from-pink-300 to-rose-200 dark:from-pink-600 dark:to-purple-500 flex items-center justify-center font-extrabold text-xs text-slate-700 dark:text-pink-100 font-rounded shadow-sm border border-white/20'
+                : 'w-9 h-9 shrink-0 rounded-full bg-slate-200 dark:bg-threads-elevated flex items-center justify-center text-[11px] font-bold text-slate-600 dark:text-threads-text'
+            }
+          >
             {photo.username.substring(0, 2).toUpperCase()}
           </div>
-          <div>
-            <h3 className="font-rounded font-extrabold text-sm text-slate-800 dark:text-pink-100 leading-tight">
-              {photo.username}
-            </h3>
-            <p className="text-[9px] text-slate-400 dark:text-zinc-500 font-bold uppercase tracking-wider mt-0.5">
-              {formatTime(photo.created_at)}
-            </p>
-          </div>
+          {isDetail ? (
+            <div>
+              <h3 className="font-rounded font-extrabold text-sm text-slate-800 dark:text-pink-100 leading-tight">
+                {photo.username}
+              </h3>
+              <p className="text-[9px] text-slate-400 dark:text-zinc-500 font-bold uppercase tracking-wider mt-0.5">
+                {formatTime(photo.created_at)}
+              </p>
+            </div>
+          ) : (
+            <div className="min-w-0 flex items-center gap-1 text-sm">
+              <h3 className="font-semibold text-slate-900 dark:text-threads-text truncate">{photo.username}</h3>
+              <span className="text-slate-400 dark:text-threads-muted">·</span>
+              <span className="text-slate-400 dark:text-threads-muted text-[13px] shrink-0">
+                {formatTime(photo.created_at)}
+              </span>
+            </div>
+          )}
         </div>
-        
-        <div className="flex items-center gap-1.5">
+
+        <div className="flex items-center gap-1.5 shrink-0">
           {isAdmin && onRequestDelete && (
             <motion.button
               whileTap={{ scale: 0.92 }}
@@ -306,22 +321,50 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({
                 e.stopPropagation();
                 onRequestDelete(photo.id);
               }}
-              className="p-1.5 rounded-xl bg-rose-100 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-600 dark:text-rose-400 cursor-pointer"
+              className={
+                isDetail
+                  ? 'p-1.5 rounded-xl bg-rose-100 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-600 dark:text-rose-400 cursor-pointer'
+                  : 'p-2 rounded-full text-rose-500 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-threads-hover cursor-pointer'
+              }
               title="Xóa bài (Admin)"
             >
               <Trash2 className="w-3.5 h-3.5" />
             </motion.button>
           )}
-          <div className="p-1.5 bg-rose-50 dark:bg-zinc-850 rounded-xl border border-rose-100/30 dark:border-zinc-800">
-            <Sparkles className="w-3.5 h-3.5 text-pink-400 dark:text-pink-300" />
-          </div>
+          {isDetail ? (
+            <div className="p-1.5 bg-rose-50 dark:bg-zinc-850 rounded-xl border border-rose-100/30 dark:border-zinc-800">
+              <Sparkles className="w-3.5 h-3.5 text-pink-400 dark:text-pink-300" />
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="p-2 rounded-full text-slate-400 dark:text-threads-muted hover:bg-slate-100 dark:hover:bg-threads-hover"
+              aria-label="More"
+            >
+              <MoreHorizontal className="w-4 h-4" />
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Main Image Container */}
+      {/* Caption above media — feed / Threads only */}
+      {!isDetail && photo.caption && (
+        <p
+          className={`text-[15px] leading-snug text-slate-800 dark:text-threads-text mb-2.5 pl-[2.75rem] ${getCaptionTextEffectClass(photo.caption_text_effect)}`}
+          style={{ color: photo.caption_text_color || undefined }}
+        >
+          {photo.caption}
+        </p>
+      )}
+
+      {/* Main media */}
       <div
-        onClick={handleImageClick}
-        className="relative w-full aspect-square rounded-[2rem] overflow-hidden cursor-pointer select-none bg-slate-50 dark:bg-zinc-800/60 shadow-inner group"
+        onClick={isVideoMedia(photo) ? undefined : handleImageClick}
+        className={
+          isDetail
+            ? 'relative w-full aspect-square rounded-[2rem] overflow-hidden cursor-pointer select-none bg-slate-50 dark:bg-zinc-800/60 shadow-inner group'
+            : 'relative w-full aspect-square rounded-xl overflow-hidden cursor-pointer select-none bg-slate-100 dark:bg-threads-surface group ml-[2.75rem] max-w-[calc(100%-2.75rem)]'
+        }
       >
         {/* Blur-up Placeholder */}
         {!isLoaded && (
@@ -331,14 +374,18 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({
         )}
 
         {isVideoMedia(photo) ? (
-          <SnapVideo
-            src={photo.image_url}
-            autoPlay={autoPlay}
-            onLoaded={() => setIsLoaded(true)}
-            className={`transition-all duration-700 ease-out ${
-              isLoaded ? 'blur-0 scale-100' : 'blur-xl scale-105'
-            }`}
-          />
+          <div className="w-full h-full" onClick={(e) => e.stopPropagation()}>
+            {isDetail ? (
+              <DetailVideoPlayer src={photo.image_url} onLoaded={() => setIsLoaded(true)} />
+            ) : (
+              <SnapVideo
+                src={photo.image_url}
+                autoPlay={autoPlay}
+                onLoaded={() => setIsLoaded(true)}
+                className={`transition-opacity duration-500 ${isLoaded ? 'opacity-100' : 'opacity-80'}`}
+              />
+            )}
+          </div>
         ) : (
           <img
             src={photo.image_url}
@@ -352,16 +399,22 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({
         )}
 
         {/* Inner shadow overlay */}
-        <div className="absolute inset-0 pointer-events-none rounded-[2rem] border border-black/5" />
+        <div
+          className={`absolute inset-0 pointer-events-none border border-black/5 dark:border-white/5 ${
+            isDetail ? 'rounded-[2rem]' : 'rounded-xl'
+          }`}
+        />
 
         {/* Floating Sound Widget overlay (Spotify style) */}
         {photo.song_title && (
-          <div 
-            onClick={(e) => {
-              e.stopPropagation();
-              setIsPlaying(!isPlaying);
-            }}
-            className="absolute top-4 left-4 z-30 flex items-center space-x-2 bg-black/60 backdrop-blur-lg border border-white/15 px-3 py-2 rounded-full hover:bg-black/75 hover:border-white/25 transition-all duration-300 active:scale-95 shadow-md"
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={handleMusicToggle}
+            onKeyDown={(e) => e.key === 'Enter' && handleMusicToggle(e as unknown as React.MouseEvent)}
+            className={`absolute top-4 left-4 z-50 flex items-center space-x-2 bg-black/60 backdrop-blur-lg border px-3 py-2 rounded-full hover:bg-black/75 transition-all duration-300 active:scale-95 shadow-md cursor-pointer pointer-events-auto touch-manipulation ${
+              musicError ? 'border-rose-400/60' : 'border-white/15 hover:border-white/25'
+            }`}
           >
             {/* Spinning Album Art */}
             <motion.div
@@ -391,23 +444,25 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({
             </div>
 
             {/* Sound indicator / Visualizer */}
-            <div className="flex items-center space-x-0.5 h-3.5 pl-2 border-l border-white/20">
-              {isPlaying ? (
+            <div className="flex items-center space-x-0.5 h-3.5 pl-2 border-l border-white/20 min-w-[18px] justify-center">
+              {musicLoading ? (
+                <div className="w-3 h-3 border border-white/40 border-t-white rounded-full animate-spin" />
+              ) : isPlaying ? (
                 <div className="flex items-end space-x-[2.5px] h-3">
                   {[...Array(4)].map((_, i) => (
                     <div
                       key={i}
                       className="w-[2px] bg-pink-300 rounded-full visualizer-bar"
-                      style={{ 
+                      style={{
                         height: '100%',
                         animationDelay: `${i * 0.15}s`,
-                        animationDuration: `${0.6 + i * 0.1}s`
+                        animationDuration: `${0.6 + i * 0.1}s`,
                       }}
                     />
                   ))}
                 </div>
               ) : (
-                <Play className="w-2.5 h-2.5 text-white fill-white" />
+                <Play className={`w-2.5 h-2.5 fill-white ${musicError ? 'text-rose-300' : 'text-white'}`} />
               )}
             </div>
           </div>
@@ -467,28 +522,30 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({
           ))}
         </AnimatePresence>
 
-        {/* Floating caption pill (Locket style) with custom color */}
-        {photo.caption && (() => {
-          const bgStyle: React.CSSProperties = {
-            ...resolveCaptionBackground(photo.caption_bg_style, photo.caption_bg_color),
-            color: photo.caption_text_color || '#ffffff',
-          };
-          const fxClass = getCaptionTextEffectClass(photo.caption_text_effect);
-          return (
-            <div
-              className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 max-w-[85%] w-auto backdrop-blur-md border border-white/10 px-3.5 py-1.5 rounded-2xl shadow-lg text-center pointer-events-none select-none"
-              style={bgStyle}
-            >
-              <p className={`text-[11px] font-extrabold font-rounded leading-normal break-words ${fxClass}`}>
-                {photo.caption}
-              </p>
-            </div>
-          );
-        })()}
+        {/* Caption pill on media — detail / Locket */}
+        {isDetail &&
+          photo.caption &&
+          (() => {
+            const bgStyle: React.CSSProperties = {
+              ...resolveCaptionBackground(photo.caption_bg_style, photo.caption_bg_color),
+              color: photo.caption_text_color || '#ffffff',
+            };
+            const fxClass = getCaptionTextEffectClass(photo.caption_text_effect);
+            return (
+              <div
+                className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 max-w-[85%] w-auto backdrop-blur-md border border-white/10 px-3.5 py-1.5 rounded-2xl shadow-lg text-center pointer-events-none select-none"
+                style={bgStyle}
+              >
+                <p className={`text-[11px] font-extrabold font-rounded leading-normal break-words ${fxClass}`}>
+                  {photo.caption}
+                </p>
+              </div>
+            );
+          })()}
       </div>
 
-      {/* Caption & Reactions Footer */}
-      <div className="mt-3.5 px-1.5">
+      {/* Reactions */}
+      <div className={isDetail ? 'mt-3.5 px-1.5' : 'mt-3 pl-[2.75rem]'}>
         {/* Reaction Pill Container */}
         <div className="flex flex-wrap items-center gap-2">
           {Object.entries(reactionData).map(([emoji, data]) => {
@@ -508,8 +565,12 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({
                   onClick={() => onReact(photo.id, emoji)}
                   className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-full text-sm font-bold font-rounded transition-all duration-300 border ${
                     hasReacted
-                      ? 'bg-pink-100/70 border-pink-200 text-pink-600 dark:bg-pink-950/40 dark:border-pink-900/70 dark:text-pink-200 shadow-sm shadow-pink-100/20'
-                      : 'bg-slate-50 border-slate-100 hover:bg-slate-100 text-slate-600 dark:bg-zinc-800/60 dark:border-zinc-800 dark:hover:bg-zinc-800 dark:text-zinc-400'
+                      ? isDetail
+                        ? 'bg-pink-100/70 border-pink-200 text-pink-600 dark:bg-pink-950/40 dark:border-pink-900/70 dark:text-pink-200 shadow-sm'
+                        : 'bg-pink-100/80 text-pink-600 dark:bg-threads-hover dark:text-threads-text border-transparent'
+                      : isDetail
+                        ? 'bg-slate-50 border-slate-100 hover:bg-slate-100 text-slate-600 dark:bg-zinc-800/60 dark:border-zinc-800 dark:hover:bg-zinc-800 dark:text-zinc-400'
+                        : 'text-slate-600 dark:text-threads-muted hover:bg-slate-100 dark:hover:bg-threads-hover border-transparent'
                   }`}
                 >
                   <span>{emoji}</span>
@@ -525,7 +586,11 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({
               whileHover={{ scale: 1.08 }}
               whileTap={{ scale: 0.92 }}
               onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-              className="p-2 bg-slate-50 border border-slate-100 hover:bg-slate-100 dark:bg-zinc-800/60 dark:border-zinc-800 dark:hover:bg-zinc-800 text-slate-500 dark:text-zinc-400 rounded-full flex items-center justify-center transition-colors shadow-sm"
+              className={
+                isDetail
+                  ? 'p-2 bg-slate-50 border border-slate-100 hover:bg-slate-100 dark:bg-zinc-800/60 dark:border-zinc-800 dark:hover:bg-zinc-800 text-slate-500 dark:text-zinc-400 rounded-full flex items-center justify-center transition-colors shadow-sm'
+                  : 'p-2 text-slate-500 dark:text-threads-muted hover:bg-slate-100 dark:hover:bg-threads-hover rounded-full flex items-center justify-center transition-colors'
+              }
               aria-label="Add reaction"
             >
               <Smile className="w-4 h-4 text-slate-500 dark:text-zinc-400" />
@@ -544,7 +609,11 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({
                     animate={{ opacity: 1, scale: 1, y: 0 }}
                     exit={{ opacity: 0, scale: 0.88, y: 12 }}
                     transition={{ type: "spring", damping: 18, stiffness: 220 }}
-                    className="absolute bottom-full left-0 mb-2.5 z-40 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md border border-pink-100/60 dark:border-zinc-800 rounded-2xl shadow-xl p-2 flex items-center space-x-1.5"
+                    className={`absolute bottom-full left-0 mb-2.5 z-40 backdrop-blur-md rounded-2xl shadow-xl p-2 flex items-center space-x-1.5 ${
+                      isDetail
+                        ? 'bg-white/95 dark:bg-zinc-900/95 border border-pink-100/60 dark:border-zinc-800'
+                        : 'bg-white dark:bg-threads-elevated border border-rose-100/60 dark:border-threads-border rounded-xl'
+                    }`}
                   >
                     {emojis.map(emoji => (
                       <motion.button
@@ -572,6 +641,7 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({
             currentUser={currentUser}
             isLoggedIn={isLoggedIn}
             defaultExpanded={autoPlay}
+            threadsStyle={!isDetail}
             onRequireAuth={onRequireAuth}
             onAddComment={onAddComment}
             onReactComment={onReactComment}

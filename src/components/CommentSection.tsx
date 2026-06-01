@@ -15,6 +15,8 @@ interface CommentSectionProps {
   onRequireAuth: () => void;
   onAddComment: (photoId: string, body: string) => Promise<void>;
   onReactComment?: (photoId: string, commentId: string, emoji: string) => Promise<void>;
+  /** false = Locket/detail card styling */
+  threadsStyle?: boolean;
 }
 
 function formatCommentTime(isoString: string) {
@@ -40,6 +42,7 @@ export function CommentSection({
   onRequireAuth,
   onAddComment,
   onReactComment,
+  threadsStyle = true,
 }: CommentSectionProps) {
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [text, setText] = useState('');
@@ -74,7 +77,11 @@ export function CommentSection({
   };
 
   return (
-    <div className="mt-3 border-t border-pink-100/40 dark:border-zinc-800/80 pt-3">
+    <div
+      className={`mt-3 border-t pt-3 ${
+        threadsStyle ? 'border-pink-100/40 dark:border-threads-border' : 'border-pink-100/40 dark:border-zinc-800/80'
+      }`}
+    >
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}

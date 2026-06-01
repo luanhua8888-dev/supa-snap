@@ -20,6 +20,41 @@ export function isVideoMedia(photo: { media_type?: string | null; image_url?: st
   return /\.(mp4|webm|mov|m4v)(\?|$)/i.test(url);
 }
 
+export function videoExtensionFromUrl(url: string): string | null {
+  const path = url.split('?')[0]?.toLowerCase() ?? '';
+  const m = path.match(/\.(mp4|webm|mov|m4v)$/i);
+  return m ? m[1] : null;
+}
+
+export function mimeTypeFromVideoUrl(url: string): string {
+  const ext = videoExtensionFromUrl(url);
+  if (ext === 'mp4' || ext === 'm4v') return 'video/mp4';
+  if (ext === 'webm') return 'video/webm';
+  if (ext === 'mov') return 'video/quicktime';
+  return 'video/mp4';
+}
+
+/** Can this browser decode the file at `url`? (Safari often cannot play WebM.) */
+export function canBrowserPlayVideoUrl(url: string): boolean {
+  if (typeof document === 'undefined') return true;
+  const probe = document.createElement('video');
+  const ext = videoExtensionFromUrl(url);
+  if (ext === 'webm') {
+    return probe.canPlayType('video/webm') === 'probably';
+  }
+  if (ext === 'mp4' || ext === 'm4v') {
+    const t = probe.canPlayType('video/mp4');
+    return t === 'probably' || t === 'maybe';
+  }
+  if (ext === 'mov') {
+    return (
+      probe.canPlayType('video/quicktime') === 'probably' ||
+      probe.canPlayType('video/mp4') === 'probably'
+    );
+  }
+  return true;
+}
+
 export function detectMediaTypeFromBlob(blob: Blob): MediaType {
   return blob.type.startsWith('video/') ? 'video' : 'image';
 }
@@ -29,16 +64,17 @@ export function detectMediaTypeFromFile(file: File): MediaType {
 }
 
 /** Pick best MediaRecorder mime for this browser (mp4 first — better for iOS + Supabase). */
-export function pickVideoRecorderMimeType(): string {
+export function pickVideoRecorderMimeType(): string | null {
   const candidates = [
-    'video/mp4',
+    'video/mp4;codecs=avc1,mp4a.40.2',
     'video/mp4;codecs=avc1,mp4a',
+    'video/mp4',
     'video/webm;codecs=vp9,opus',
     'video/webm;codecs=vp8,opus',
     'video/webm',
-    'video/quicktime',
   ];
-  return candidates.find((m) => MediaRecorder.isTypeSupported(m)) ?? 'video/webm';
+  const found = candidates.find((m) => MediaRecorder.isTypeSupported(m));
+  return found ?? null;
 }
 
 /** Base MIME without codecs (Supabase rejects `video/webm;codecs=vp9,opus`). */

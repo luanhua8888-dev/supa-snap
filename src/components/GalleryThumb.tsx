@@ -1,5 +1,5 @@
 import { Music, Play } from 'lucide-react';
-import { isVideoMedia } from '../lib/media';
+import { canBrowserPlayVideoUrl, isVideoMedia } from '../lib/media';
 import type { PhotoData } from './PhotoCard';
 
 interface GalleryThumbProps {
@@ -9,17 +9,28 @@ interface GalleryThumbProps {
 
 export function GalleryThumb({ photo, live }: GalleryThumbProps) {
   const isVideo = isVideoMedia(photo);
+  const canPlay = !isVideo || canBrowserPlayVideoUrl(photo.image_url);
 
   return (
     <>
-      {isVideo ? (
+      {isVideo && canPlay ? (
         <video
           src={photo.image_url}
           muted
           playsInline
           preload="metadata"
-          className="w-full h-full object-cover"
+          loop
+          className="w-full h-full object-cover bg-zinc-900"
+          onLoadedData={(e) => {
+            const v = e.currentTarget;
+            v.muted = true;
+            if (v.paused) v.play().catch(() => undefined);
+          }}
         />
+      ) : isVideo ? (
+        <div className="w-full h-full bg-zinc-900 flex items-center justify-center">
+          <Play className="w-6 h-6 text-white/70 fill-white/70" />
+        </div>
       ) : (
         <img
           src={photo.image_url}

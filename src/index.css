@@ -8,7 +8,7 @@
   }
   
   body.dark {
-    @apply bg-[#0b0809] text-pink-50;
+    @apply bg-threads-bg text-threads-text;
   }
 }
 
@@ -44,10 +44,10 @@
 }
 
 .dark .glass {
-  background: rgba(18, 14, 15, 0.65);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.04);
+  background: rgba(24, 24, 24, 0.92);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .glass-darker {
@@ -58,10 +58,10 @@
 }
 
 .dark .glass-darker {
-  background: rgba(20, 16, 17, 0.85);
-  backdrop-filter: blur(25px);
-  -webkit-backdrop-filter: blur(25px);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(28, 28, 28, 0.95);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 /* Hide scrollbar utility */
@@ -250,12 +250,43 @@
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
 }
 
-/* Snap video — no native control bar */
+/* Snap video — no native control bar (feed only) */
 .snap-video::-webkit-media-controls {
   display: none !important;
 }
 .snap-video::-webkit-media-controls-enclosure {
   display: none !important;
+}
+
+/* Detail view — full bleed, no native chrome */
+.detail-video {
+  pointer-events: none;
+}
+.detail-video::-webkit-media-controls {
+  display: none !important;
+}
+.detail-video::-webkit-media-controls-enclosure {
+  display: none !important;
+}
+.detail-video::-webkit-media-controls-panel {
+  display: none !important;
+}
+
+.safe-area-pt {
+  padding-top: max(0.5rem, env(safe-area-inset-top, 0px));
+}
+
+.safe-area-pb {
+  padding-bottom: max(1.5rem, env(safe-area-inset-bottom, 0px));
+}
+
+.safe-area-pb-nav {
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 0px));
+}
+
+/* Main scroll clears floating bottom nav + home indicator */
+.main-scroll-pad {
+  padding-bottom: max(1rem, env(safe-area-inset-bottom, 0px));
 }
 
 .gallery-cell:hover {
@@ -270,6 +301,72 @@
 }
 
 .dark .greeting-card {
-  background: linear-gradient(135deg, rgba(30, 20, 25, 0.85) 0%, rgba(20, 15, 22, 0.7) 100%);
-  border: 1px solid rgba(255, 105, 180, 0.12);
+  background: #181818;
+  border: 1px solid #2f2f2f;
+}
+
+.dark .threads-post {
+  border-bottom: 1px solid #2f2f2f;
+}
+
+.dark .threads-post:last-child {
+  border-bottom: none;
+}
+
+/* Cinematic feed loader — GPU-friendly (transform + opacity only) */
+.vortex-loader {
+  position: relative;
+  width: 52px;
+  height: 52px;
+}
+
+.vortex-loader-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  border-top-color: rgba(245, 245, 245, 0.85);
+  border-right-color: rgba(119, 119, 119, 0.45);
+  animation: vortex-spin 0.85s linear infinite;
+}
+
+.vortex-loader-ring--delay {
+  inset: 6px;
+  border-top-color: rgba(180, 180, 180, 0.6);
+  border-right-color: transparent;
+  animation-duration: 1.15s;
+  animation-direction: reverse;
+}
+
+.vortex-loader-core {
+  position: absolute;
+  inset: 18px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.35) 0%, transparent 70%);
+  animation: vortex-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes vortex-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes vortex-pulse {
+  0%,
+  100% {
+    opacity: 0.5;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.05);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vortex-loader-ring,
+  .vortex-loader-core {
+    animation: none;
+  }
 }
