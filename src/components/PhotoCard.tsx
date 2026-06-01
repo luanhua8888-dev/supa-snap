@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Smile, Sparkles, Play, Pause, Music, Heart } from 'lucide-react';
+import { Smile, Sparkles, Play, Music } from 'lucide-react';
 
 // Deezer preview URLs are CORS-enabled — play directly, no proxy needed
 

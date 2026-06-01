@@ -1,6 +1,6 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Camera, RefreshCw, Sparkles, Image as ImageIcon, Check, RotateCcw, LayoutGrid, Music, Play, Pause } from 'lucide-react';
+import { X, Camera, RefreshCw, Sparkles, Image as ImageIcon, Check, RotateCcw, LayoutGrid, Music } from 'lucide-react';
 
 /**
  * deezerJsonp — queries Deezer Search API via JSONP (no CORS, no proxy, no API key).
