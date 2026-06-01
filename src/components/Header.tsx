@@ -1,5 +1,5 @@
 import React from 'react';
-import { Moon, Sun, Sparkles, User, LogOut } from 'lucide-react';
+import { Moon, Sun, User, LogOut } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 interface HeaderProps {
@@ -31,9 +31,9 @@ export const Header: React.FC<HeaderProps> = ({
               duration: 5, 
               ease: 'easeInOut' 
             }}
-            className="p-1.5 bg-gradient-to-tr from-pink-500 to-violet-500 rounded-xl shadow-[0_4px_10px_rgba(244,63,94,0.3)] border border-white/20"
+            className="p-0.5 rounded-xl shadow-[0_4px_10px_rgba(244,63,94,0.3)] border border-white/20 overflow-hidden"
           >
-            <Sparkles className="w-4 h-4 text-white animate-pulse" />
+            <img src="/favicon.svg" alt="SupaSnap" className="w-8 h-8" />
           </motion.div>
           
           <h1 className="font-rounded font-black text-lg tracking-tight bg-gradient-to-r from-pink-500 via-rose-450 to-indigo-400 dark:from-pink-300 dark:via-rose-350 dark:to-indigo-300 bg-clip-text text-transparent group-hover:brightness-110 transition-all duration-300">

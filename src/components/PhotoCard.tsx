@@ -1,6 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Smile, Sparkles, Play, Music } from 'lucide-react';
+import { Smile, Sparkles, Play, Music, Trash2 } from 'lucide-react';
+import { resolveCaptionBackground, getCaptionTextEffectClass } from '../lib/captionStyles';
+import { isVideoMedia } from '../lib/media';
+import { SnapVideo } from './SnapVideo';
+import { CommentSection } from './CommentSection';
+import type { Comment } from '../types/comment';
 
 // Deezer preview URLs are CORS-enabled — play directly, no proxy needed
 
@@ -24,6 +29,9 @@ export interface PhotoData {
   song_preview_url?: string | null;
   caption_text_color?: string | null;
   caption_bg_style?: string | null;
+  caption_text_effect?: string | null;
+  caption_bg_color?: string | null;
+  media_type?: string | null;
 }
 
 interface PhotoCardProps {
@@ -31,6 +39,13 @@ interface PhotoCardProps {
   currentUser: string;
   onReact: (photoId: string, emoji: string) => Promise<void>;
   autoPlay?: boolean;
+  comments?: Comment[];
+  isLoggedIn?: boolean;
+  onRequireAuth?: () => void;
+  onAddComment?: (photoId: string, body: string) => Promise<void>;
+  onReactComment?: (photoId: string, commentId: string, emoji: string) => Promise<void>;
+  isAdmin?: boolean;
+  onRequestDelete?: (photoId: string) => void;
 }
 
 interface FloatingReaction {
@@ -51,7 +66,19 @@ interface FloatingNote {
   size: number;
 }
 
-export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, currentUser, onReact, autoPlay = false }) => {
+export const PhotoCard: React.FC<PhotoCardProps> = ({
+  photo,
+  currentUser,
+  onReact,
+  autoPlay = false,
+  comments = [],
+  isLoggedIn = false,
+  onRequireAuth,
+  onAddComment,
+  onReactComment,
+  isAdmin = false,
+  onRequestDelete,
+}) => {
   const [isLoaded, setIsLoaded] = useState(false);
   const [lastClickTime, setLastClickTime] = useState(0);
   const [floatingReactions, setFloatingReactions] = useState<FloatingReaction[]>([]);
@@ -270,8 +297,24 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, currentUser, onReac
           </div>
         </div>
         
-        <div className="p-1.5 bg-rose-50 dark:bg-zinc-850 rounded-xl border border-rose-100/30 dark:border-zinc-800">
-          <Sparkles className="w-3.5 h-3.5 text-pink-400 dark:text-pink-300" />
+        <div className="flex items-center gap-1.5">
+          {isAdmin && onRequestDelete && (
+            <motion.button
+              whileTap={{ scale: 0.92 }}
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onRequestDelete(photo.id);
+              }}
+              className="p-1.5 rounded-xl bg-rose-100 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-600 dark:text-rose-400 cursor-pointer"
+              title="Xóa bài (Admin)"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </motion.button>
+          )}
+          <div className="p-1.5 bg-rose-50 dark:bg-zinc-850 rounded-xl border border-rose-100/30 dark:border-zinc-800">
+            <Sparkles className="w-3.5 h-3.5 text-pink-400 dark:text-pink-300" />
+          </div>
         </div>
       </div>
 
@@ -287,15 +330,26 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, currentUser, onReac
           </div>
         )}
 
-        <img
-          src={photo.image_url}
-          alt={photo.caption || 'Snap'}
-          loading="lazy"
-          onLoad={() => setIsLoaded(true)}
-          className={`w-full h-full object-cover transition-all duration-700 ease-out group-hover:scale-103 ${
-            isLoaded ? 'blur-0 scale-100' : 'blur-xl scale-105'
-          }`}
-        />
+        {isVideoMedia(photo) ? (
+          <SnapVideo
+            src={photo.image_url}
+            autoPlay={autoPlay}
+            onLoaded={() => setIsLoaded(true)}
+            className={`transition-all duration-700 ease-out ${
+              isLoaded ? 'blur-0 scale-100' : 'blur-xl scale-105'
+            }`}
+          />
+        ) : (
+          <img
+            src={photo.image_url}
+            alt={photo.caption || 'Snap'}
+            loading="lazy"
+            onLoad={() => setIsLoaded(true)}
+            className={`w-full h-full object-cover transition-all duration-700 ease-out group-hover:scale-103 ${
+              isLoaded ? 'blur-0 scale-100' : 'blur-xl scale-105'
+            }`}
+          />
+        )}
 
         {/* Inner shadow overlay */}
         <div className="absolute inset-0 pointer-events-none rounded-[2rem] border border-black/5" />
@@ -415,20 +469,17 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, currentUser, onReac
 
         {/* Floating caption pill (Locket style) with custom color */}
         {photo.caption && (() => {
-          const bg = photo.caption_bg_style;
           const bgStyle: React.CSSProperties = {
-            background: bg === 'light' ? 'rgba(255,255,255,0.68)'
-                      : bg === 'pink'  ? 'rgba(236,72,153,0.78)'
-                      : bg === 'none'  ? 'transparent'
-                      : 'rgba(0,0,0,0.60)',  // dark (default)
+            ...resolveCaptionBackground(photo.caption_bg_style, photo.caption_bg_color),
             color: photo.caption_text_color || '#ffffff',
           };
+          const fxClass = getCaptionTextEffectClass(photo.caption_text_effect);
           return (
             <div
               className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 max-w-[85%] w-auto backdrop-blur-md border border-white/10 px-3.5 py-1.5 rounded-2xl shadow-lg text-center pointer-events-none select-none"
               style={bgStyle}
             >
-              <p className="text-[11px] font-extrabold font-rounded leading-normal break-words">
+              <p className={`text-[11px] font-extrabold font-rounded leading-normal break-words ${fxClass}`}>
                 {photo.caption}
               </p>
             </div>
@@ -512,6 +563,20 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, currentUser, onReac
             </AnimatePresence>
           </div>
         </div>
+
+        {onAddComment && onRequireAuth && (
+          <CommentSection
+            photoId={photo.id}
+            photoAuthor={photo.username}
+            comments={comments}
+            currentUser={currentUser}
+            isLoggedIn={isLoggedIn}
+            defaultExpanded={autoPlay}
+            onRequireAuth={onRequireAuth}
+            onAddComment={onAddComment}
+            onReactComment={onReactComment}
+          />
+        )}
       </div>
     </motion.div>
   );
