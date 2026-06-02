@@ -53,8 +53,8 @@ export const NicknameModal: React.FC<NicknameModalProps> = ({ onSelect }) => {
           </motion.div>
           
           <div className="space-y-1.5">
-            <h2 className="text-2xl font-black font-rounded text-slate-800 dark:text-pink-100 tracking-tight">
-              Welcome to SupaSnap!
+            <h2 className="text-3xl font-lunae text-slate-800 dark:text-pink-100 tracking-normal">
+              Welcome to Lunæ!
             </h2>
             <p className="text-xs text-slate-500 dark:text-zinc-400 max-w-[240px] mx-auto leading-relaxed">
               Choose a cute nickname to start snapping and reacting with friends! <Heart className="w-3 h-3 inline fill-pink-400 text-pink-400" />

@@ -212,3 +212,75 @@ where id = 'photos';
 -- Reload the schema cache for PostgREST/Supabase API to recognize new columns immediately
 notify pgrst, 'reload schema';
 
+-- Appended schema for new features: Follows, Status, and Chat messages
+
+-- 1. Add status column to profiles table
+alter table public.profiles add column if not exists status text default '';
+
+-- 2. Follows table
+create table if not exists public.follows (
+  id uuid default gen_random_uuid() primary key,
+  follower_username text not null,
+  following_username text not null,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  unique (follower_username, following_username)
+);
+
+alter table public.follows enable row level security;
+
+drop policy if exists "Allow public read follows" on public.follows;
+create policy "Allow public read follows" on public.follows for select using (true);
+
+drop policy if exists "Allow public insert follows" on public.follows;
+create policy "Allow public insert follows" on public.follows for insert with check (true);
+
+drop policy if exists "Allow public delete follows" on public.follows;
+create policy "Allow public delete follows" on public.follows for delete using (true);
+
+-- 3. Messages table for Chat
+create table if not exists public.messages (
+  id uuid default gen_random_uuid() primary key,
+  sender_username text not null,
+  receiver_username text not null,
+  body text not null check (char_length(body) > 0 and char_length(body) <= 1000),
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+alter table public.messages enable row level security;
+
+drop policy if exists "Allow public read messages" on public.messages;
+create policy "Allow public read messages" on public.messages for select using (true);
+
+drop policy if exists "Allow public insert messages" on public.messages;
+create policy "Allow public insert messages" on public.messages for insert with check (true);
+
+-- Enable realtime for follows and messages
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_publication_rel pr
+    join pg_publication p on p.oid = pr.prpubid
+    join pg_class c on c.oid = pr.prrelid
+    where p.pubname = 'supabase_realtime' and c.relname = 'follows'
+  ) then
+    alter publication supabase_realtime add table public.follows;
+  end if;
+  
+  if not exists (
+    select 1
+    from pg_publication_rel pr
+    join pg_publication p on p.oid = pr.prpubid
+    join pg_class c on c.oid = pr.prrelid
+    where p.pubname = 'supabase_realtime' and c.relname = 'messages'
+  ) then
+    alter publication supabase_realtime add table public.messages;
+  end if;
+exception
+  when others then
+    raise notice 'Could not add follows/messages to realtime: %', sqlerrm;
+end;
+$$;
+
+notify pgrst, 'reload schema';
+

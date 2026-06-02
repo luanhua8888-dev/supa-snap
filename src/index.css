@@ -1,6 +1,10 @@
-@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@300;400;500;600;700;800;900&family=Quicksand:wght@300;400;500;600;700;800;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@300;400;500;600;700;800;900&family=Quicksand:wght@300;400;500;600;700;800;900&family=Alex+Brush&family=Satisfy&family=Playfair+Display:ital,wght@0,400..900;1,400..900&display=swap');
 @import "tailwindcss";
 @config "../tailwind.config.js";
+
+.font-lunae {
+  font-family: 'Satisfy', 'Alex Brush', 'Playfair Display', cursive, serif;
+}
 
 @layer base {
   body {
@@ -454,3 +458,48 @@
     animation: none;
   }
 }
+
+/* Premium Logo Glow & Animation */
+.logo-glow {
+  filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.15));
+  transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.logo-glow:hover {
+  transform: scale(1.08) rotate(4deg);
+  filter: drop-shadow(0 0 16px rgba(255, 255, 255, 0.75)) drop-shadow(0 0 4px rgba(236, 72, 153, 0.4));
+}
+
+.dark .logo-glow:hover {
+  filter: drop-shadow(0 0 20px rgba(255, 255, 255, 0.85)) drop-shadow(0 0 6px rgba(244, 63, 94, 0.5));
+}
+
+/* Tab Bar Micro-Interactions */
+.nav-tab-active::after {
+  content: '';
+  position: absolute;
+  bottom: 0px;
+  left: 25%;
+  width: 50%;
+  height: 3px;
+  background: linear-gradient(90deg, #ec4899, #f43f5e);
+  border-radius: 99px;
+  filter: blur(0.5px);
+  animation: tab-bar-grow 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.dark .nav-tab-active::after {
+  background: linear-gradient(90deg, #f43f5e, #fda4af);
+}
+
+@keyframes tab-bar-grow {
+  from {
+    width: 0%;
+    left: 50%;
+  }
+  to {
+    width: 50%;
+    left: 25%;
+  }
+}
+

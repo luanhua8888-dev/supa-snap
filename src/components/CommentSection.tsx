@@ -17,6 +17,7 @@ interface CommentSectionProps {
   onReactComment?: (photoId: string, commentId: string, emoji: string) => Promise<void>;
   /** false = Locket/detail card styling */
   threadsStyle?: boolean;
+  userAvatars?: Record<string, string>;
 }
 
 function formatCommentTime(isoString: string) {
@@ -43,6 +44,7 @@ export function CommentSection({
   onAddComment,
   onReactComment,
   threadsStyle = true,
+  userAvatars,
 }: CommentSectionProps) {
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [text, setText] = useState('');
@@ -125,19 +127,23 @@ export function CommentSection({
                       key={c.id}
                       className={`flex gap-2 ${c.username === currentUser ? 'flex-row-reverse' : ''}`}
                     >
-                      <div className="shrink-0 w-7 h-7 rounded-full bg-slate-100 dark:bg-zinc-800 flex items-center justify-center text-[9px] font-extrabold border border-slate-200/50 dark:border-zinc-700">
-                        {c.username.substring(0, 2).toUpperCase()}
+                      <div className="shrink-0 w-7 h-7 rounded-full bg-slate-100 dark:bg-zinc-800 flex items-center justify-center text-[9px] font-extrabold border border-slate-200/50 dark:border-zinc-700 overflow-hidden">
+                        {userAvatars?.[c.username] ? (
+                          <img src={userAvatars[c.username]} alt="" className="w-full h-full object-cover" />
+                        ) : (
+                          c.username.substring(0, 2).toUpperCase()
+                        )}
                       </div>
                       <div className="min-w-0 max-w-[88%]">
                         <div
                           className={`rounded-2xl px-3 py-2 border ${
                             c.username === currentUser
-                              ? 'bg-pink-500/10 border-pink-200/40 dark:border-pink-800/40'
+                              ? 'bg-slate-900/5 dark:bg-white/5 border-slate-200 dark:border-zinc-800'
                               : 'bg-slate-50 border-slate-100 dark:bg-zinc-800/60 dark:border-zinc-800'
                           }`}
                         >
                           <div className="flex items-baseline gap-2 flex-wrap">
-                            <span className="text-[10px] font-extrabold text-pink-600 dark:text-pink-300">
+                            <span className="text-[10px] font-extrabold text-slate-800 dark:text-zinc-300">
                               {c.username}
                             </span>
                             <span className="text-[9px] text-zinc-400">
@@ -157,7 +163,7 @@ export function CommentSection({
                                 onClick={() => handleReact(c.id, emoji)}
                                 className={`px-2 py-0.5 rounded-full text-[10px] font-bold border cursor-pointer transition-colors ${
                                   data.mine
-                                    ? 'bg-pink-100 border-pink-200 text-pink-600 dark:bg-pink-950/40 dark:border-pink-800 dark:text-pink-300'
+                                    ? 'bg-slate-900/10 border-slate-900 text-slate-900 dark:bg-white/10 dark:border-white dark:text-white'
                                     : 'bg-white/80 border-slate-100 text-slate-500 dark:bg-zinc-900 dark:border-zinc-800'
                                 }`}
                               >
@@ -191,12 +197,12 @@ export function CommentSection({
                 maxLength={300}
                 placeholder={isLoggedIn ? `Bình luận ${photoAuthor}...` : 'Đăng nhập để bình luận'}
                 disabled={!isLoggedIn || isSending}
-                className="flex-1 px-3.5 py-2.5 rounded-2xl text-[11px] font-semibold font-rounded bg-slate-50 dark:bg-zinc-800/80 border border-slate-100 dark:border-zinc-700 focus:outline-none focus:ring-2 focus:ring-pink-400/30 disabled:opacity-50"
+                className="flex-1 px-3.5 py-2.5 rounded-2xl text-[11px] font-semibold font-rounded bg-slate-50 dark:bg-zinc-800/80 border border-slate-100 dark:border-zinc-700 focus:outline-none focus:border-slate-450 dark:focus:border-zinc-650 disabled:opacity-50"
               />
               <button
                 type="submit"
                 disabled={!text.trim() || isSending || !isLoggedIn}
-                className="w-10 h-10 rounded-2xl bg-gradient-to-r from-pink-500 to-rose-400 text-white flex items-center justify-center disabled:opacity-40 cursor-pointer"
+                className="w-10 h-10 rounded-2xl bg-slate-950 dark:bg-white text-white dark:text-black flex items-center justify-center hover:bg-slate-900 dark:hover:bg-zinc-150 disabled:opacity-40 cursor-pointer transition-colors"
               >
                 <Send className="w-4 h-4" />
               </button>

@@ -1,6 +1,6 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Camera, RefreshCw, Sparkles, Image as ImageIcon, Check, RotateCcw, LayoutGrid, Music, Video, ChevronLeft, ChevronRight } from 'lucide-react';
+import { X, Camera, RefreshCw, Sparkles, Image as ImageIcon, Check, RotateCcw, Music, Video, ChevronLeft, ChevronRight } from 'lucide-react';
 import { type CaptionBgStyle, type CaptionTextEffect } from '../lib/captionStyles';
 import { CaptionStylePicker } from './CaptionStylePicker';
 import { StickerPicker } from './StickerPicker';
@@ -139,6 +139,8 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordChunksRef = useRef<Blob[]>([]);
   const recordTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const cameraGrantedRef = useRef(false);
+  const lastFacingRef = useRef<'user' | 'environment'>('user');
 
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
@@ -155,7 +157,7 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
   const currentStickers = currentDraft?.stickers ?? [];
   const [caption, setCaption] = useState('');
   const [showFlash, setShowFlash] = useState(false);
-  const [showGrid, setShowGrid] = useState(true);
+  const [showGrid] = useState(false);
 
   // Music selector states
   const [selectedSong, setSelectedSong] = useState<Song | null>(null);
@@ -215,6 +217,7 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
     if (!isOpen) {
       clearSnapState();
       stopCamera();
+      cameraGrantedRef.current = false;
       cleanupAudioPreview();
       return;
     }
@@ -233,7 +236,33 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
       stopCamera();
       cleanupAudioPreview();
     };
-  }, [isOpen, facingMode, captureMode]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
+
+  // Chỉ restart camera khi đổi facingMode (front/back) — cần stream mới
+  useEffect(() => {
+    if (!isOpen || !cameraGrantedRef.current) return;
+    if (facingMode !== lastFacingRef.current) {
+      lastFacingRef.current = facingMode;
+      startCamera();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [facingMode]);
+
+  // Khi đổi captureMode (photo↔video), KHÔNG restart camera — reuse stream hiện tại
+  // Nếu cần audio cho video mà stream chưa có audio track, thêm audio track
+  useEffect(() => {
+    if (!isOpen || !cameraGrantedRef.current || !stream) return;
+    if (captureMode === 'video' && stream.getAudioTracks().length === 0) {
+      // Thêm audio track vào stream hiện tại mà không hỏi lại camera permission
+      navigator.mediaDevices.getUserMedia({ audio: true }).then((audioStream) => {
+        audioStream.getAudioTracks().forEach((track) => stream.addTrack(track));
+      }).catch(() => {
+        // Không có mic cũng OK — quay video không tiếng
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [captureMode]);
 
   // Load featured songs via JSONP when drawer opens (no CORS, no proxy)
   useEffect(() => {
@@ -340,19 +369,21 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
     }
     try {
       const video = getCameraVideoConstraints(facingMode);
-      const wantAudio = captureMode === 'video';
 
+      // Luôn request cả audio+video lần đầu để browser chỉ hỏi 1 lần
       let mediaStream: MediaStream;
       try {
         mediaStream = await navigator.mediaDevices.getUserMedia({
           video,
-          audio: wantAudio,
+          audio: true,
         });
       } catch (firstErr) {
-        if (!wantAudio) throw firstErr;
+        // Fallback: không có mic thì chỉ xin camera
         mediaStream = await navigator.mediaDevices.getUserMedia({ video, audio: false });
       }
 
+      cameraGrantedRef.current = true;
+      lastFacingRef.current = facingMode;
       setStream(mediaStream);
       setCameraError(null);
       await attachLivePreview(mediaStream);
@@ -682,7 +713,7 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
           animate={{ y: 0 }}
           exit={{ y: '100%' }}
           transition={{ type: 'spring', damping: 25, stiffness: 220 }}
-          className="absolute inset-0 z-50 bg-brand flex flex-col overflow-hidden min-h-0"
+          className="absolute inset-0 z-50 bg-[#101010] flex flex-col overflow-hidden min-h-0"
         >
           {/* Top Bar Header */}
           <div className="flex items-center justify-between px-4 py-3 z-10 text-white flex-shrink-0">
@@ -696,17 +727,21 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
               <X className="w-4.5 h-4.5" />
             </motion.button>
             
-            <span className="font-rounded font-extrabold text-[15px] text-pink-300 flex items-center space-x-1.5 uppercase tracking-wider">
-              <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
-              <span>{previewUrl ? 'Review Snap' : 'Take a Snap'}</span>
-            </span>
+            <div className="flex-1 text-center">
+              {previewUrl && (
+                <span className="font-rounded font-extrabold text-[15px] text-slate-200 flex items-center justify-center gap-2 uppercase tracking-wider">
+                  <Sparkles className="w-4 h-4 text-sky-300 animate-pulse" />
+                  Review
+                </span>
+              )}
+            </div>
 
             <div className="w-10" />
           </div>
 
           {/* Scrollable body — tránh đẩy nút Đăng ra ngoài màn hình */}
           <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden no-scrollbar">
-          <div className="relative flex flex-col items-center bg-brand px-4 py-2">
+          <div className="relative flex flex-col items-center bg-[#101010] px-4 py-2">
             {/* Flash Effect */}
             <AnimatePresence>
               {showFlash && (
@@ -761,7 +796,7 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
               {!previewUrl &&
                 (cameraError ? (
                   <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-6 space-y-4">
-                    <Camera className="w-12 h-12 text-pink-400 animate-pulse" />
+                    <Camera className="w-12 h-12 text-sky-300 animate-pulse" />
                     <p className="text-xs text-zinc-400 max-w-[200px] leading-relaxed font-rounded">
                       {cameraError}
                     </p>
@@ -800,7 +835,7 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
                   animate={{ opacity: 1, y: 0 }}
                   className="absolute top-4 left-4 z-20 flex items-center space-x-2 bg-black/60 backdrop-blur-md border border-white/15 px-3 py-1.5 rounded-full text-white text-[10px] font-bold font-rounded"
                 >
-                  <Music className="w-3.5 h-3.5 text-pink-400 animate-bounce" />
+                  <Music className="w-3.5 h-3.5 text-sky-300 animate-bounce" />
                   <span className="truncate max-w-[120px]">{selectedSong.title} - {selectedSong.artist}</span>
                 </motion.div>
               )}
@@ -814,35 +849,24 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
                 </div>
               )}
 
-              {/* Camera Toolbar HUD */}
-              {!previewUrl && !cameraError && (
-                <div className="absolute right-4 top-4 z-20 flex flex-col space-y-3">
-                  <button
-                    onClick={() => setShowGrid(!showGrid)}
-                    className={`w-9 h-9 rounded-full flex items-center justify-center backdrop-blur-md border transition-all cursor-pointer ${
-                      showGrid
-                        ? 'bg-pink-500 text-white border-pink-400 shadow-lg shadow-pink-500/20'
-                        : 'bg-black/45 text-white/80 border-white/10 hover:bg-black/60'
-                    }`}
-                    title="Toggle Grid"
-                  >
-                    <LayoutGrid className="w-4 h-4" />
-                  </button>
-
-                  <button
-                    onClick={() => setIsMusicDrawerOpen(true)}
-                    className={`w-9 h-9 rounded-full flex items-center justify-center backdrop-blur-md border transition-all cursor-pointer ${
-                      selectedSong
-                        ? 'bg-pink-500 text-white border-pink-400 shadow-lg shadow-pink-500/20 animate-pulse'
-                        : 'bg-black/45 text-white/80 border-white/10 hover:bg-black/60'
-                    }`}
-                    title="Attach Music"
-                  >
-                    <Music className="w-4 h-4" />
-                  </button>
-                </div>
-              )}
             </div>
+
+            {!previewUrl && !cameraError && (
+              <div className="w-full max-w-[min(340px,92vw)] mt-4 flex justify-center">
+                <button
+                  type="button"
+                  onClick={() => setIsMusicDrawerOpen(true)}
+                  className={`inline-flex items-center gap-2 px-4 py-2 rounded-2xl border transition-all duration-200 text-sm font-semibold ${
+                    selectedSong
+                      ? 'bg-sky-500/15 text-sky-200 border-sky-400 shadow-[0_12px_30px_rgba(56,189,248,0.18)]'
+                      : 'bg-white/5 text-slate-200 border-white/10 hover:bg-white/10'
+                  }`}
+                >
+                  <Music className="w-4 h-4" />
+                  {selectedSong ? 'Nhạc đã chọn' : 'Chọn nhạc'}
+                </button>
+              </div>
+            )}
 
             {previewUrl && selectedSticker && (
               <StickerSizeControls
@@ -880,7 +904,7 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
                         setSelectedStickerId(null);
                       }}
                       className={`shrink-0 w-11 h-11 rounded-lg overflow-hidden border-2 cursor-pointer ${
-                        i === draftIndex ? 'border-pink-400 ring-2 ring-pink-400/40' : 'border-white/20'
+                        i === draftIndex ? 'border-sky-400 ring-2 ring-sky-400/40' : 'border-white/20'
                       }`}
                     >
                       {d.mediaType === 'video' ? (
@@ -933,7 +957,7 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
                   onClick={() => setIsMusicDrawerOpen(true)}
                   className={`w-full max-w-[370px] mx-auto mt-2 flex items-center justify-center gap-2 py-2 rounded-xl text-[11px] font-extrabold font-rounded border cursor-pointer ${
                     selectedSong
-                      ? 'bg-pink-500/20 text-pink-200 border-pink-400/40'
+                      ? 'bg-sky-500/20 text-sky-200 border-sky-400/40'
                       : 'bg-white/5 text-zinc-400 border-white/10'
                   }`}
                 >
@@ -967,7 +991,7 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
           />
 
           {/* Bottom — luôn cố định dưới cùng */}
-          <div className="px-4 pt-3 pb-6 z-20 bg-brand/95 backdrop-blur-md border-t border-white/10 flex-shrink-0 safe-area-pb">
+          <div className="px-4 pt-3 pb-6 z-20 bg-[#101010]/95 backdrop-blur-md border-t border-white/10 flex-shrink-0 safe-area-pb">
             {!previewUrl && !cameraError && (
               <div className="flex justify-center mb-4">
                 <div className="flex p-1 rounded-2xl bg-white/8 border border-white/10">
@@ -977,7 +1001,7 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
                     disabled={isRecording}
                     className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-[11px] font-extrabold font-rounded transition-all cursor-pointer ${
                       captureMode === 'photo'
-                        ? 'bg-pink-500 text-white shadow-md'
+                        ? 'bg-sky-500 text-white shadow-md'
                         : 'text-zinc-400 hover:text-white'
                     }`}
                   >
@@ -990,7 +1014,7 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
                     disabled={isRecording}
                     className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-[11px] font-extrabold font-rounded transition-all cursor-pointer ${
                       captureMode === 'video'
-                        ? 'bg-pink-500 text-white shadow-md'
+                        ? 'bg-sky-500 text-white shadow-md'
                         : 'text-zinc-400 hover:text-white'
                     }`}
                   >
@@ -1019,7 +1043,7 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
                   whileTap={{ scale: 0.98 }}
                   onClick={handleUploadSubmit}
                   disabled={isUploading || !canPost}
-                  className="flex-1 min-h-[44px] max-h-[44px] rounded-xl font-rounded font-extrabold text-sm flex items-center justify-center gap-2 cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed bg-gradient-to-br from-pink-500 via-rose-500 to-violet-600 text-white shadow-[0_4px_20px_rgba(236,72,153,0.45)] border border-pink-300/25 active:scale-[0.98] transition-transform"
+                  className="flex-1 min-h-[44px] max-h-[44px] rounded-xl font-rounded font-extrabold text-sm flex items-center justify-center gap-2 cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed bg-gradient-to-br from-sky-600 via-sky-500 to-indigo-700 text-white shadow-[0_4px_20px_rgba(56,189,248,0.35)] border border-sky-300/25 active:scale-[0.98] transition-transform"
                 >
                   {isUploading ? (
                     <div className="flex items-center gap-2">
@@ -1054,7 +1078,7 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
                 <div className="relative flex items-center justify-center">
                   <div
                     className={`absolute w-22 h-22 rounded-full border pointer-events-none ${
-                      isRecording ? 'border-red-500 animate-pulse' : 'border-pink-500/60 shutter-pulse'
+                      isRecording ? 'border-red-500 animate-pulse' : 'border-sky-500/60 shutter-pulse'
                     }`}
                   />
 
@@ -1084,7 +1108,7 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
                         }`}
                       />
                     ) : (
-                      <div className="w-full h-full bg-white rounded-full hover:bg-pink-100 transition-colors" />
+                      <div className="w-full h-full bg-white rounded-full hover:bg-slate-200 transition-colors" />
                     )}
                   </motion.button>
                 </div>
@@ -1125,7 +1149,7 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
                   {/* Drawer Header */}
                   <div className="flex items-center justify-between pb-3 border-b border-white/5 flex-shrink-0">
                     <h4 className="font-rounded font-extrabold text-white text-md flex items-center space-x-2">
-                      <Music className="w-4.5 h-4.5 text-pink-400" />
+                      <Music className="w-4.5 h-4.5 text-sky-300" />
                       <span>Background Soundtracks 🎵</span>
                     </h4>
                     <button
@@ -1143,7 +1167,7 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
                       placeholder="Search songs or artists... 🔍"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-2xl text-white text-xs font-rounded font-semibold focus:outline-none focus:border-pink-500/50 focus:bg-white/10 transition-all placeholder-zinc-500"
+                      className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-2xl text-white text-xs font-rounded font-semibold focus:outline-none focus:border-sky-500/50 focus:bg-white/10 transition-all placeholder-zinc-500"
                     />
                     {searchQuery && (
                       <button
@@ -1159,7 +1183,7 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
                   <div className="space-y-2.5 overflow-y-auto pr-1 no-scrollbar flex-1 pb-4">
                     {isSearching ? (
                       <div className="flex flex-col items-center justify-center py-12 space-y-3">
-                        <div className="w-6 h-6 border-2 border-pink-500/20 border-t-pink-500 rounded-full animate-spin" />
+                        <div className="w-6 h-6 border-2 border-sky-500/20 border-t-sky-500 rounded-full animate-spin" />
                         <span className="text-[10px] text-zinc-550 font-bold font-rounded tracking-wide uppercase">Searching Music...</span>
                       </div>
                     ) : searchResults.length === 0 ? (
@@ -1177,7 +1201,7 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
                             }}
                             className={`w-full flex items-center space-x-3 p-3 rounded-2xl border transition-all text-left cursor-pointer ${
                               !selectedSong
-                                ? 'bg-pink-500/15 border-pink-500/40 text-pink-300'
+                                ? 'bg-sky-500/15 border-sky-500/40 text-sky-300'
                                 : 'bg-white/5 border-white/5 text-zinc-300 hover:bg-white/8'
                             }`}
                           >
@@ -1202,7 +1226,7 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
                               onClick={() => handlePlayPreview(song)}
                               className={`w-full flex items-center justify-between p-3 rounded-2xl border transition-all cursor-pointer text-left ${
                                 isSelected
-                                  ? 'bg-pink-500/10 border-pink-500/30 text-pink-300'
+                                  ? 'bg-sky-500/10 border-sky-500/30 text-sky-300'
                                   : 'bg-white/5 border-white/5 text-zinc-300 hover:bg-white/8'
                               }`}
                             >
@@ -1218,7 +1242,7 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
                                         {[...Array(3)].map((_, idx) => (
                                           <div
                                             key={idx}
-                                            className="w-[1.5px] bg-pink-400 rounded-full visualizer-bar"
+                                            className="w-[1.5px] bg-sky-300 rounded-full visualizer-bar"
                                             style={{ 
                                               height: '100%', 
                                               animationDelay: `${idx * 0.15}s`,
@@ -1248,7 +1272,7 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
                                   }}
                                   className={`px-3 py-1.5 rounded-xl text-[10px] font-extrabold font-rounded transition-all cursor-pointer ${
                                     isSelected
-                                      ? 'bg-pink-500 text-white border border-pink-400'
+                                      ? 'bg-sky-500 text-white border border-sky-400'
                                       : 'bg-white/10 text-white hover:bg-white/20 border border-white/5'
                                   }`}
                                 >

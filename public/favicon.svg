@@ -1,20 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
-  <defs>
-    <linearGradient id="bg" x1="16" y1="8" x2="112" y2="120" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#ff4d8d"/>
-      <stop offset="0.55" stop-color="#c084fc"/>
-      <stop offset="1" stop-color="#6366f1"/>
-    </linearGradient>
-    <linearGradient id="shine" x1="40" y1="28" x2="88" y2="76" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#fff" stop-opacity="0.95"/>
-      <stop offset="1" stop-color="#fff" stop-opacity="0.2"/>
-    </linearGradient>
-  </defs>
-  <rect width="128" height="128" rx="32" fill="url(#bg)"/>
-  <rect x="8" y="8" width="112" height="112" rx="28" fill="white" fill-opacity="0.08"/>
-  <circle cx="64" cy="58" r="22" fill="url(#shine)" stroke="white" stroke-width="4"/>
-  <circle cx="64" cy="58" r="10" fill="#1e1030" fill-opacity="0.35"/>
-  <path d="M44 88h40l-8 18H52l-8-18z" fill="white" fill-opacity="0.92"/>
-  <path d="M92 42l6 6-20 20-8-4 22-22z" fill="#fde68a"/>
-  <circle cx="96" cy="36" r="5" fill="#fef08a"/>
+  <rect width="128" height="128" rx="36" fill="#101010"/>
+  
+  <!-- Outer Teardrop -->
+  <path d="M 64 26 C 80 46, 90 64, 90 78 A 26 26 0 0 1 38 78 C 38 64, 48 46, 64 26 Z" stroke="#ffffff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  
+  <!-- Inner Teardrop -->
+  <path d="M 64 44 C 73 56, 78 68, 78 78 A 14 14 0 0 1 50 78 C 50 68, 55 56, 64 44 Z" stroke="#ffffff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  
+  <!-- Interlocking Circle -->
+  <circle cx="74" cy="80" r="18" stroke="#ffffff" stroke-width="5" />
 </svg>
