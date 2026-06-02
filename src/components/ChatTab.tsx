@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useMemo, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MessageSquare, Send, ArrowLeft, Search, User, Sparkles } from 'lucide-react';
 
@@ -8,6 +8,7 @@ export interface ChatMessage {
   receiver_username: string;
   body: string;
   created_at: string;
+  read_at?: string | null;
 }
 
 interface ChatTabProps {
@@ -16,6 +17,11 @@ interface ChatTabProps {
   messages: ChatMessage[];
   onSendMessage: (receiver: string, text: string) => Promise<void>;
   usernamesList: string[];
+  activeRecipient: string | null;
+  onSelectRecipient: (recipient: string | null) => void;
+  unreadCounts: Record<string, number>;
+  userStatuses: Record<string, { last_seen_at?: string; status?: string }>;
+  readCutoffs?: Record<string, string>;
 }
 
 export const ChatTab: React.FC<ChatTabProps> = ({
@@ -24,8 +30,12 @@ export const ChatTab: React.FC<ChatTabProps> = ({
   messages,
   onSendMessage,
   usernamesList,
+  activeRecipient,
+  onSelectRecipient,
+  unreadCounts,
+  userStatuses,
+  readCutoffs,
 }) => {
-  const [activeRecipient, setActiveRecipient] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [text, setText] = useState('');
   const [isSending, setIsSending] = useState(false);
@@ -121,6 +131,17 @@ export const ChatTab: React.FC<ChatTabProps> = ({
   }, [chatPartners, partnerDetails]);
 
   // Filter messages for active thread
+  const getStatusText = (username: string) => {
+    const status = userStatuses[username.toLowerCase()];
+    if (!status?.last_seen_at) return 'Offline';
+    const ageMs = Date.now() - new Date(status.last_seen_at).getTime();
+    if (ageMs < 120000) return 'Online';
+    const minutes = Math.max(1, Math.round(ageMs / 60000));
+    if (minutes < 60) return `${minutes} phút trước`;
+    const hours = Math.round(minutes / 60);
+    return `${hours} giờ trước`;
+  };
+
   const activeMessages = useMemo(() => {
     if (!activeRecipient) return [];
     const rLower = activeRecipient.toLowerCase();
@@ -204,6 +225,9 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                 sortedPartners.map((partner) => {
                   const avatar = getPartnerAvatar(partner);
                   const detail = partnerDetails[partner.toLowerCase()];
+                  // debug partner/unread mapping
+                  // eslint-disable-next-line no-console
+                  console.debug('ChatTab partner render', partner, 'lower:', partner.toLowerCase(), 'unread:', unreadCounts[partner.toLowerCase()]);
                   
                   return (
                     <motion.button
@@ -212,7 +236,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                       whileTap={{ scale: 0.98 }}
                       onClick={(e) => {
                         e.preventDefault();
-                        setActiveRecipient(partner);
+                        onSelectRecipient(partner);
                       }}
                       className="w-full flex items-center gap-3 p-3.5 rounded-2xl hover:bg-slate-50 dark:hover:bg-threads-hover transition-colors text-left border-b border-slate-100/10 dark:border-threads-border/20 cursor-pointer"
                     >
@@ -224,17 +248,29 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                         )}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between">
-                          <span className="font-semibold text-sm text-slate-800 dark:text-threads-text">
-                            {partner}
-                          </span>
+                        <div className="flex items-center justify-between gap-2">
+                          <div>
+                            <span className="font-semibold text-sm text-slate-800 dark:text-threads-text">
+                              {partner}
+                            </span>
+                            <span className="ml-2 text-[9px] text-slate-500 dark:text-threads-muted font-medium">
+                              {getStatusText(partner)}
+                            </span>
+                          </div>
                           <span className="text-[10px] text-slate-400 dark:text-threads-muted font-medium">
                             {detail?.lastTime}
                           </span>
                         </div>
-                        <p className="text-xs text-slate-450 dark:text-threads-muted truncate mt-0.5 font-medium">
-                          {detail?.lastMessage}
-                        </p>
+                        <div className="mt-1 flex items-center justify-between gap-2">
+                          <p className="text-xs text-slate-450 dark:text-threads-muted truncate font-medium">
+                            {detail?.lastMessage}
+                          </p>
+                          {unreadCounts[partner.toLowerCase()] && partner.toLowerCase() !== (activeRecipient || '').toLowerCase() ? (
+                            <span className="text-[10px] font-bold bg-rose-500 text-white rounded-full px-2 py-0.5 min-w-[1.5rem] text-center">
+                              {unreadCounts[partner.toLowerCase()] > 9 ? '9+' : unreadCounts[partner.toLowerCase()]}
+                            </span>
+                          ) : null}
+                        </div>
                       </div>
                     </motion.button>
                   );
@@ -255,7 +291,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
             <div className="p-3.5 bg-white dark:bg-threads-bg border-b border-slate-150/10 dark:border-threads-border flex items-center gap-3">
               <button
                 type="button"
-                onClick={() => setActiveRecipient(null)}
+                onClick={() => onSelectRecipient(null)}
                 className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-threads-hover text-slate-500 dark:text-threads-muted cursor-pointer transition-colors"
                 aria-label="Quay lại"
               >
@@ -263,10 +299,10 @@ export const ChatTab: React.FC<ChatTabProps> = ({
               </button>
 
               <div className="w-9 h-9 rounded-full bg-slate-200 dark:bg-threads-elevated flex items-center justify-center font-bold text-xs overflow-hidden relative border border-slate-200/40 dark:border-zinc-800">
-                {getPartnerAvatar(activeRecipient) ? (
-                  <img src={getPartnerAvatar(activeRecipient)} alt="" className="w-full h-full object-cover" />
+                {getPartnerAvatar(activeRecipient || '') ? (
+                  <img src={getPartnerAvatar(activeRecipient || '')} alt="" className="w-full h-full object-cover" />
                 ) : (
-                  activeRecipient.substring(0, 2).toUpperCase()
+                  (activeRecipient || '').substring(0, 2).toUpperCase()
                 )}
               </div>
 
@@ -274,9 +310,8 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                 <h3 className="font-bold text-sm text-slate-800 dark:text-threads-text truncate">
                   {activeRecipient}
                 </h3>
-                <span className="text-[10px] text-green-500 dark:text-green-400 font-extrabold flex items-center gap-1 mt-0.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-ping" />
-                  Đang hoạt động
+                <span className="text-[10px] text-slate-500 dark:text-threads-muted font-extrabold flex items-center gap-1 mt-0.5">
+                  {activeRecipient ? getStatusText(activeRecipient) : 'Đang hoạt động'}
                 </span>
               </div>
             </div>
@@ -312,11 +347,23 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                         }`}
                       >
                         <p>{msg.body}</p>
-                        <span className={`text-[8.5px] block text-right mt-1.5 ${
-                          isMine ? 'text-white/60' : 'text-slate-400 dark:text-threads-muted'
-                        }`}>
-                          {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </span>
+                        <div className="mt-2 flex items-center justify-between gap-2 text-[8.5px]">
+                          <span className={`block ${isMine ? 'text-white/60' : 'text-slate-400 dark:text-threads-muted'}`}>
+                            {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                          {isMine && msg.read_at ? (
+                            <span className="text-[8px] text-emerald-500 font-bold">Đã xem</span>
+                          ) : !isMine && !msg.read_at ? (
+                            (() => {
+                              const sender = msg.sender_username.toLowerCase();
+                              const cutoff = readCutoffs?.[sender];
+                              const createdMs = Date.parse(msg.created_at || '') || 0;
+                              const cutoffMs = cutoff ? Date.parse(cutoff) || 0 : 0;
+                              if (cutoff && createdMs <= cutoffMs) return null;
+                              return <span className="text-[8px] text-rose-500 font-bold">Mới</span>;
+                            })()
+                          ) : null}
+                        </div>
                       </div>
                     </div>
                   );

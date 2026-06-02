@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Smile, Sparkles, Music, Trash2, MoreHorizontal } from 'lucide-react';
+import { Smile, Music, Trash2, MoreHorizontal } from 'lucide-react';
 import {
   resolveCaptionBackground,
   resolveCaptionTextStyle,
@@ -340,9 +340,6 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({
                 <Trash2 className="w-3.5 h-3.5" />
               </motion.button>
             )}
-            <div className="p-1.5 bg-slate-55 dark:bg-zinc-850 rounded-xl border border-slate-100 dark:border-zinc-800">
-              <Sparkles className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-350" />
-            </div>
           </div>
         </div>
 

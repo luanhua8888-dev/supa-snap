@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Camera, Compass, X, Search, User, MessageSquare, LayoutGrid, List } from 'lucide-react';
 import { isAdminUser } from './lib/admin';
@@ -53,6 +53,17 @@ export default function App() {
   const [followersCount, setFollowersCount] = useState<number>(0);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [usernamesList, setUsernamesList] = useState<string[]>([]);
+  const [unreadMessagesBySender, setUnreadMessagesBySender] = useState<Record<string, number>>({});
+  const [unreadConversationsCount, setUnreadConversationsCount] = useState(0);
+  const [totalUnreadMessages, setTotalUnreadMessages] = useState(0);
+  const [readCutoffs, setReadCutoffs] = useState<Record<string, string>>({});
+  const readCutoffsRef = useRef<Record<string, string>>({});
+
+  useEffect(() => {
+    readCutoffsRef.current = readCutoffs || {};
+  }, [readCutoffs]);
+  const [chatActiveRecipient, setChatActiveRecipient] = useState<string | null>(null);
+  const [userProfiles, setUserProfiles] = useState<Record<string, { avatar_url?: string; last_seen_at?: string; status?: string }>>({});
 
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isCameraOpen, setIsCameraOpen] = useState(false);
@@ -67,6 +78,7 @@ export default function App() {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [photoToDelete, setPhotoToDelete] = useState<string | null>(null);
   const [isDeletingPhoto, setIsDeletingPhoto] = useState(false);
+  const lastPhotosFetchRef = useRef<number>(0);
 
   const { play: playFeedEntrance, variant: entranceVariant } = useFeedEntrance(
     photos.length,
@@ -276,26 +288,33 @@ export default function App() {
       let profilesData: any[] = [];
       const { data, error } = await supabase
         .from('profiles')
-        .select('username, avatar_url');
+        .select('username, avatar_url, last_seen_at, status');
       
       if (!error && data) {
         profilesData = data;
       } else {
         console.warn('profiles select error or no avatar_url:', error?.message);
-        // Fallback: select without avatar_url
         const { data: fallbackData } = await supabase.from('profiles').select('username');
         profilesData = fallbackData || [];
       }
 
       const avatarMap: Record<string, string> = {};
+      const profileMap: Record<string, { avatar_url?: string; last_seen_at?: string; status?: string }> = {};
       profilesData.forEach((p) => {
         if (p.username) {
-          const localAvatar = localStorage.getItem(`lunae_avatar_${p.username.toLowerCase()}`);
-          avatarMap[p.username.toLowerCase()] = p.avatar_url || localAvatar || '';
+          const usernameKey = p.username.toLowerCase();
+          const localAvatar = localStorage.getItem(`lunae_avatar_${usernameKey}`);
+          avatarMap[usernameKey] = p.avatar_url || localAvatar || '';
+          profileMap[usernameKey] = {
+            avatar_url: avatarMap[usernameKey],
+            last_seen_at: p.last_seen_at,
+            status: p.status || '',
+          };
         }
       });
       setUsernamesList(profilesData.map((p) => p.username).filter(Boolean));
       setUserAvatars(avatarMap);
+      setUserProfiles(profileMap);
     } catch (err) {
       console.warn('fetchUserAvatars error:', err);
     }
@@ -355,7 +374,45 @@ export default function App() {
         .select('*')
         .order('created_at', { ascending: true });
       if (!error && data) {
-        setChatMessages(data);
+        // Merge with localStorage fallback so locally-marked read messages stay read
+        try {
+          const localMsgs = JSON.parse(localStorage.getItem('lunae_chat_messages') || '[]');
+          const localById: Record<string, any> = {};
+          const localByKey: Record<string, any> = {};
+          (localMsgs || []).forEach((m: any) => {
+            if (m && m.id) localById[m.id] = m;
+            try {
+              const s = (m.sender_username || '').toLowerCase();
+              const r = (m.receiver_username || '').toLowerCase();
+              const k = `${s}|${r}|${m.created_at}`;
+              localByKey[k] = m;
+            } catch (e) {
+              // ignore
+            }
+          });
+
+          const merged = (data || []).map((srv: any) => {
+            // prefer server read_at if present, otherwise look up local by id or by key
+            const local = localById[srv.id];
+            if (local && local.read_at && !srv.read_at) {
+              return { ...srv, read_at: local.read_at };
+            }
+            try {
+              const s = (srv.sender_username || '').toLowerCase();
+              const r = (srv.receiver_username || '').toLowerCase();
+              const k = `${s}|${r}|${srv.created_at}`;
+              const local2 = localByKey[k];
+              if (local2 && local2.read_at && !srv.read_at) {
+                return { ...srv, read_at: local2.read_at };
+              }
+            } catch (e) {}
+            return srv;
+          });
+
+          setChatMessages(merged);
+        } catch (e) {
+          setChatMessages(data);
+        }
       } else {
         const localMsgs = JSON.parse(localStorage.getItem('lunae_chat_messages') || '[]');
         setChatMessages(localMsgs);
@@ -421,28 +478,141 @@ export default function App() {
     fetchStats();
     fetchChatMessages();
 
+    const updateFocusSeen = () => {
+      if (sessionUser) {
+        void supabase
+          .from('profiles')
+          .update({ last_seen_at: new Date().toISOString() })
+          .eq('id', sessionUser.id);
+        try {
+          const key = usernameLower;
+          setUserProfiles((prev) => ({
+            ...prev,
+            [key]: {
+              ...(prev[key] || {}),
+              last_seen_at: new Date().toISOString(),
+            },
+          }));
+        } catch (e) {
+          // ignore
+        }
+      }
+    };
+
+    window.addEventListener('focus', updateFocusSeen);
+
     // Messages channel
     const messagesChannel = supabase
       .channel('realtime-messages')
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages' },
-        (payload) => {
+        async (payload) => {
           const newMsg = payload.new as ChatMessage;
+          try {
+            console.debug('realtime new message payload:', { newMsg });
+            console.debug('realtime new message payload json:', JSON.stringify(newMsg));
+          } catch (e) {
+            console.debug('realtime new message payload (stringify failed)', e);
+          }
+          try {
+            console.debug('realtime new message keys', Object.keys(newMsg || {}));
+            console.debug('realtime new message fields', {
+              id: (newMsg as any).id,
+              created_at: (newMsg as any).created_at,
+              sender_username: (newMsg as any).sender_username,
+              sender: (newMsg as any).sender,
+              sender_user_id: (newMsg as any).sender_user_id,
+              receiver_username: (newMsg as any).receiver_username,
+              receiver: (newMsg as any).receiver,
+              receiver_user_id: (newMsg as any).receiver_user_id,
+            });
+          } catch (e) {
+            console.debug('realtime new message fields introspect failed', e);
+          }
+          try {
+            const rr = (newMsg.receiver_username || newMsg.receiver || '').toString();
+            const ss = (newMsg.sender_username || newMsg.sender || '').toString();
+            console.debug('realtime new message meta', { receiver_raw: rr, sender_raw: ss, Notification_permission: Notification.permission, visibility: document.visibilityState });
+          } catch (e) {
+            console.debug('realtime debug meta failed', e);
+          }
+          // Normalize message fields so code always has sender_username/receiver_username
+          const normalizedMsg: any = {
+            ...newMsg,
+            sender_username: (newMsg.sender_username || (newMsg as any).sender || '').toString(),
+            receiver_username: (newMsg.receiver_username || (newMsg as any).receiver || '').toString(),
+            created_at: (newMsg.created_at || new Date().toISOString()).toString(),
+          };
+          console.debug('normalized realtime message', normalizedMsg);
+
           setChatMessages((prev) => {
-            if (prev.some((m) => m.id === newMsg.id)) return prev;
-            return [...prev, newMsg];
+            if (prev.some((m) => m.id === normalizedMsg.id)) return prev;
+            return [...prev, normalizedMsg];
           });
 
-          const receiver = newMsg.receiver_username?.trim().toLowerCase();
-          const sender = newMsg.sender_username?.trim().toLowerCase();
-          const currentUsername = usernameLower.trim();
+          // Robust receiver/sender detection: prefer username fields, fall back to ids
+          const receiverRaw = (normalizedMsg.receiver_username || (normalizedMsg as any).receiver || (normalizedMsg as any).receiver_user_id || '').toString();
+          const senderRaw = (normalizedMsg.sender_username || (normalizedMsg as any).sender || (normalizedMsg as any).sender_user_id || '').toString();
+          const receiver = (receiverRaw || '').trim().toLowerCase();
+          const sender = (senderRaw || '').trim().toLowerCase();
+          const fallbackNick = (localStorage.getItem('supasnap_nickname') || '').toString().toLowerCase();
+          const sessionMetaNick = (sessionUser?.user_metadata?.nickname || sessionUser?.user_metadata?.username || '').toString().toLowerCase();
+          const currentUsername = ((nickname || fallbackNick || sessionMetaNick) || '').toString().trim().toLowerCase();
 
-          if (receiver === currentUsername && sender !== currentUsername) {
+          console.debug('message handler vars', { receiver, sender, currentUsername, sessionUserId: sessionUser?.id });
+
+          const incomingForCurrentUser =
+            (receiver && currentUsername && receiver === currentUsername) ||
+            (sessionUser && (String((newMsg as any).receiver_user_id || '').toLowerCase() === String(sessionUser.id).toLowerCase()));
+
+          if (incomingForCurrentUser && sender && sender !== currentUsername) {
             const title = `Tin nhắn mới từ ${newMsg.sender_username || 'ai đó'}!`;
             const body = newMsg.body || 'Bạn vừa nhận được tin nhắn mới.';
+            console.debug('incoming message for current user; showing toast/notification', { title, body, Notification_permission: Notification.permission, visibility: document.visibilityState });
             showToast(title, 'info');
             sendBrowserNotification(title, body);
+
+            const isViewing = chatActiveRecipient?.toLowerCase() === sender;
+            console.debug('realtime handling new message', { sender, receiver, currentUsername, isViewing, created_at: newMsg.created_at, cutoff: readCutoffsRef.current?.[sender] });
+
+            // Always increment unread for valid incoming messages when not viewing thread
+            if (!isViewing) {
+              try {
+                const createdMs = Date.parse(newMsg.created_at || '') || Date.now();
+                const cutoffIso = readCutoffsRef.current?.[sender] || null;
+                const cutoffMs = cutoffIso ? Date.parse(cutoffIso) || 0 : 0;
+                console.debug('created_vs_cutoff', { createdMs, cutoffIso, cutoffMs });
+                if (createdMs > cutoffMs) {
+                  console.debug('incrementing unread for', { sender });
+                  setUnreadMessagesBySender((prev) => {
+                    const next = { ...(prev || {}) };
+                    next[sender] = (next[sender] || 0) + 1;
+                    const total = Object.values(next).reduce((s, v) => s + (typeof v === 'number' ? v : 0), 0);
+                    setTotalUnreadMessages(total);
+                    setUnreadConversationsCount(Object.keys(next).length);
+                    return next;
+                  });
+                } else {
+                  console.debug('message older than cutoff — not counting as unread', { sender, createdMs, cutoffMs });
+                }
+              } catch (e) {
+                console.debug('error parsing dates for unread increment, will still increment', e);
+                setUnreadMessagesBySender((prev) => {
+                  const next = { ...(prev || {}) };
+                  next[sender] = (next[sender] || 0) + 1;
+                  const total = Object.values(next).reduce((s, v) => s + (typeof v === 'number' ? v : 0), 0);
+                  setTotalUnreadMessages(total);
+                  setUnreadConversationsCount(Object.keys(next).length);
+                  return next;
+                });
+              }
+            } else {
+              console.debug('user is viewing thread; marking read', { sender });
+              await markThreadRead(sender);
+            }
+          } else {
+            console.debug('message not for current user or from self — ignoring for unread', { receiver, sender, currentUsername });
           }
         }
       )
@@ -468,11 +638,245 @@ export default function App() {
       )
       .subscribe();
 
+    // Profiles channel to reflect online/offline quickly
+    const profilesChannel = supabase
+      .channel('realtime-profiles')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'profiles' },
+        (payload) => {
+          try {
+            const updated = payload.new as any;
+            if (updated?.username) {
+              setUserProfiles((prev) => ({
+                ...prev,
+                [updated.username.toLowerCase()]: {
+                  avatar_url: updated.avatar_url || prev[updated.username.toLowerCase()]?.avatar_url,
+                  last_seen_at: updated.last_seen_at,
+                  status: updated.status || prev[updated.username.toLowerCase()]?.status,
+                },
+              }));
+            }
+          } catch (e) {
+            // ignore
+          }
+        }
+      )
+      .subscribe();
+
     return () => {
+      window.removeEventListener('focus', updateFocusSeen);
       supabase.removeChannel(messagesChannel);
       supabase.removeChannel(followsChannel);
+      supabase.removeChannel(profilesChannel);
     };
+  }, [nickname, chatActiveRecipient, sessionUser]);
+
+  useEffect(() => {
+    updateUnreadCounts(chatMessages);
+  }, [chatMessages, nickname]);
+
+  // Load read cutoffs from localStorage for the current user (persist last-read timestamp per partner)
+  useEffect(() => {
+    if (!nickname) {
+      setReadCutoffs({});
+      return;
+    }
+    try {
+      const key = `lunae_chat_read_cutoffs_${nickname.toLowerCase()}`;
+      const raw = localStorage.getItem(key) || '{}';
+      const parsed = JSON.parse(raw) || {};
+      setReadCutoffs(parsed);
+    } catch (e) {
+      setReadCutoffs({});
+    }
   }, [nickname]);
+
+  useEffect(() => {
+    if (chatActiveRecipient) {
+      void markThreadRead(chatActiveRecipient);
+    }
+  }, [chatActiveRecipient, nickname]);
+
+  // When user opens a thread, immediately clear unread counts locally and mark messages read locally
+  useEffect(() => {
+    if (!chatActiveRecipient || !nickname) return;
+    const current = nickname.toLowerCase();
+    const senderLower = chatActiveRecipient.toLowerCase();
+
+    // 1) Optimistically mark messages as read locally so UI updates immediately
+    setChatMessages((prev) =>
+      prev.map((msg) => {
+        try {
+          const s = msg.sender_username.toLowerCase();
+          const r = msg.receiver_username.toLowerCase();
+          if (s === senderLower && r === current && !msg.read_at) {
+            return { ...msg, read_at: new Date().toISOString() };
+          }
+        } catch (e) {
+          // ignore
+        }
+        return msg;
+      })
+    );
+
+    // 2) Remove unread entry for this sender immediately
+    setUnreadMessagesBySender((prev) => {
+      const next = { ...prev };
+      if (next[senderLower]) delete next[senderLower];
+      const total = Object.values(next).reduce((s, v) => s + (typeof v === 'number' ? v : 0), 0);
+      setTotalUnreadMessages(total);
+      setUnreadConversationsCount(Object.keys(next).length);
+      return next;
+    });
+
+    // 3) Persist read state in localStorage for fallback
+    try {
+      const local = JSON.parse(localStorage.getItem('lunae_chat_messages') || '[]');
+      if (Array.isArray(local) && local.length) {
+        const updatedLocal = local.map((m: any) => {
+          try {
+            const s = (m.sender_username || '').toLowerCase();
+            const r = (m.receiver_username || '').toLowerCase();
+            if (s === senderLower && r === current) {
+              return { ...m, read_at: m.read_at || new Date().toISOString() };
+            }
+          } catch (e) {}
+          return m;
+        });
+        localStorage.setItem('lunae_chat_messages', JSON.stringify(updatedLocal));
+      }
+    } catch (e) {
+      // ignore
+    }
+  }, [chatActiveRecipient, nickname]);
+
+  const updateUnreadCounts = (messages: ChatMessage[], cutoffsOverride?: Record<string, string>) => {
+    if (!nickname) {
+      setUnreadMessagesBySender({});
+      setUnreadConversationsCount(0);
+      setTotalUnreadMessages(0);
+      return;
+    }
+
+    const current = nickname.toLowerCase();
+    const counts: Record<string, number> = {};
+    let total = 0;
+
+    messages.forEach((msg) => {
+      const receiver = msg.receiver_username?.toLowerCase();
+      const sender = msg.sender_username?.toLowerCase();
+      if (receiver !== current || sender === current) return;
+
+      // If we have a local read cutoff for this sender, treat messages older than
+      // or equal to the cutoff as read (this persists read state across syncs).
+      const effectiveCutoffs = cutoffsOverride || readCutoffs || {};
+      const cutoffIso = effectiveCutoffs[sender] || null;
+      if (cutoffIso) {
+        const cutoffMs = Date.parse(cutoffIso) || 0;
+        const createdMs = Date.parse(msg.created_at || '') || 0;
+        if (createdMs <= cutoffMs) return;
+      }
+
+      if (!msg.read_at) {
+        counts[sender] = (counts[sender] || 0) + 1;
+        total += 1;
+      }
+    });
+
+    console.debug('updateUnreadCounts - computed', { counts, total });
+    setUnreadMessagesBySender(counts);
+    setTotalUnreadMessages(total);
+    setUnreadConversationsCount(Object.keys(counts).length);
+  };
+
+  const markThreadRead = async (senderUsername: string) => {
+    if (!nickname) return;
+    const current = nickname.toLowerCase();
+    const senderLower = senderUsername.toLowerCase();
+
+    try {
+      await supabase
+        .from('messages')
+        .update({ read_at: new Date().toISOString() })
+        .ilike('receiver_username', current)
+        .ilike('sender_username', senderLower)
+        .is('read_at', null);
+    } catch (err) {
+      console.warn('Could not mark thread read:', err);
+    }
+
+    // Update local messages immediately (optimistic) and compute updated counts
+    const updatedMessages = (chatMessages || []).map((msg) =>
+      msg.sender_username.toLowerCase() === senderLower && msg.receiver_username.toLowerCase() === current
+        ? { ...msg, read_at: msg.read_at || new Date().toISOString() }
+        : msg
+    );
+    setChatMessages(updatedMessages);
+
+    // Also proactively remove the sender's unread conversation badge immediately
+    setUnreadMessagesBySender((prev) => {
+      const next = { ...prev };
+      console.debug('markThreadRead - before clear unread for', senderLower, 'prev:', prev);
+      if (next[senderLower]) {
+        delete next[senderLower];
+      }
+      const total = Object.values(next).reduce((s, v) => s + (typeof v === 'number' ? v : 0), 0);
+      setTotalUnreadMessages(total);
+      setUnreadConversationsCount(Object.keys(next).length);
+      console.debug('markThreadRead - after clear unread for', senderLower, 'next:', next, 'total:', total);
+      return next;
+    });
+    // Persist a read cutoff timestamp so future server syncs won't reintroduce unread counts
+    try {
+      const nowIso = new Date().toISOString();
+      const nextCutoffs = { ...(readCutoffs || {}), [senderLower]: nowIso };
+      setReadCutoffs(nextCutoffs);
+      try {
+        if (nickname) {
+          const key = `lunae_chat_read_cutoffs_${nickname.toLowerCase()}`;
+          localStorage.setItem(key, JSON.stringify(nextCutoffs));
+        }
+      } catch (e) {}
+
+      // Recompute unread counts using the updated cutoffs so counts clear immediately
+      try {
+        updateUnreadCounts(updatedMessages, nextCutoffs);
+      } catch (e) {}
+    } catch (e) {}
+    // Also persist to localStorage fallback so reloads reflect reads when offline
+    try {
+      const local = JSON.parse(localStorage.getItem('lunae_chat_messages') || '[]');
+      if (Array.isArray(local) && local.length) {
+        const updatedLocal = local.map((m: any) => {
+          try {
+            const s = (m.sender_username || '').toLowerCase();
+            const r = (m.receiver_username || '').toLowerCase();
+            if (s === senderLower && r === current) {
+              return { ...m, read_at: m.read_at || new Date().toISOString() };
+            }
+          } catch (e) {}
+          return m;
+        });
+        localStorage.setItem('lunae_chat_messages', JSON.stringify(updatedLocal));
+      }
+    } catch (e) {
+      // ignore localStorage errors
+    }
+  };
+
+  const handleNotificationBell = () => {
+    if (unreadConversationsCount > 0) {
+      const firstSender = Object.keys(unreadMessagesBySender)[0];
+      if (firstSender) {
+        void markThreadRead(firstSender);
+        setActiveTab('chat');
+        setChatActiveRecipient(firstSender);
+        return;
+      }
+    }
+    setActiveTab('chat');
+  };
 
   const handleFollowToggle = async (targetUsername: string) => {
     if (!nickname) {
@@ -593,6 +997,13 @@ export default function App() {
   }, [photos, nickname]);
 
   const fetchPhotos = async () => {
+    const now = Date.now();
+    // Throttle fetches: avoid calling multiple times within short window
+    if ((lastPhotosFetchRef.current || 0) && now - lastPhotosFetchRef.current < 1500) {
+      return;
+    }
+    lastPhotosFetchRef.current = now;
+
     setIsLoadingFeed(true);
     try {
       const { data, error } = await supabase
@@ -1043,7 +1454,10 @@ export default function App() {
         {/* Simulated Screen Glare Reflection */}
         {/* Global App Header */}
         {nickname ? (
-          <Header />
+          <Header
+            notificationCount={totalUnreadMessages}
+            onNotificationClick={handleNotificationBell}
+          />
         ) : (
           <header className="w-full glass px-4 safe-area-pt sm:pt-8 pb-3 border-b border-rose-150/15 dark:border-zinc-800/30 shadow-soft z-40 relative flex-shrink-0">
             <div className="max-w-md mx-auto flex items-center justify-center relative">
@@ -1143,6 +1557,16 @@ export default function App() {
                 messages={chatMessages}
                 onSendMessage={handleSendMessage}
                 usernamesList={usernamesList}
+                activeRecipient={chatActiveRecipient}
+                onSelectRecipient={(recipient) => {
+                  if (recipient) {
+                    void markThreadRead(recipient);
+                  }
+                  setChatActiveRecipient(recipient);
+                }}
+                unreadCounts={unreadMessagesBySender}
+                readCutoffs={readCutoffs}
+                userStatuses={userProfiles}
               />
             </div>
           ) : (
@@ -1405,12 +1829,18 @@ export default function App() {
                   y: activeTab === 'chat' ? -1 : 0 
                 }}
                 transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+                className="relative"
               >
                 <MessageSquare className={`w-5 h-5 transition-colors duration-300 ${
                   activeTab === 'chat'
                     ? 'text-slate-950 dark:text-white'
                     : 'text-slate-400 dark:text-zinc-550 group-hover:text-slate-600 dark:group-hover:text-zinc-300'
                 }`} />
+                {unreadConversationsCount > 0 && (
+                  <span className="absolute -right-2 -top-2 min-w-[1.4rem] h-5 rounded-full bg-rose-500 text-[10px] font-bold text-white flex items-center justify-center px-1.5">
+                    {unreadConversationsCount > 9 ? '9+' : unreadConversationsCount}
+                  </span>
+                )}
               </motion.div>
               <span className={`text-[9px] font-rounded font-extrabold tracking-wider transition-colors duration-300 ${
                 activeTab === 'chat' 
@@ -1524,13 +1954,7 @@ export default function App() {
                 initial={{ opacity: 0, y: -15, scale: 0.95 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: -15, scale: 0.95 }}
-                className={`p-3.5 rounded-2xl shadow-lg border text-xs font-bold font-rounded flex items-center justify-center text-center ${
-                  toast.type === 'success'
-                    ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-250 dark:border-emerald-900/60 text-emerald-700 dark:text-emerald-200 shadow-emerald-100/10'
-                    : toast.type === 'error'
-                    ? 'bg-rose-50 dark:bg-rose-950/40 border-rose-250 dark:border-rose-900/60 text-rose-700 dark:text-rose-200 shadow-rose-100/10'
-                    : 'bg-indigo-50 dark:bg-indigo-950/40 border-indigo-250 dark:border-indigo-900/60 text-indigo-700 dark:text-indigo-250 shadow-indigo-100/10'
-                }`}
+                className={`p-3.5 rounded-2xl shadow-[0_20px_60px_rgba(0,0,0,0.25)] border text-xs font-bold font-rounded flex items-center justify-center text-center bg-slate-950 border-slate-800 text-white`}
               >
                 <span>{toast.message}</span>
               </motion.div>

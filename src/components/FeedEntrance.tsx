@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState, useRef, type ReactNode } from 'react';
 import { motion, useReducedMotion, type Variants } from 'framer-motion';
 
 export type EntranceVariant = 'whirl' | 'cascade' | 'flip' | 'zoom' | 'slide' | 'scatter';
@@ -11,14 +11,40 @@ export function useFeedEntrance(itemCount: number, isReady: boolean, loadTick: n
   const [play, setPlay] = useState(false);
   const [variant, setVariant] = useState<EntranceVariant>('whirl');
 
+  // Track last processed loadTick to avoid retriggering repeatedly
+  const lastTickRef = useRef<number>(0);
+  // timeout ref to clear any pending timers
+  const timerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    // cleanup on unmount
+    return () => {
+      if (timerRef.current) window.clearTimeout(timerRef.current);
+    };
+  }, []);
+
   useEffect(() => {
     if (!isReady || itemCount === 0 || loadTick === 0) {
+      // don't play when not ready or empty
       setPlay(false);
       return;
     }
+
+    // If we've already handled this tick, ignore to prevent continuous replays
+    if (lastTickRef.current === loadTick) return;
+
+    lastTickRef.current = loadTick;
+
     const pick = VARIANTS[Math.floor(Math.random() * VARIANTS.length)]!;
     setVariant(pick);
     setPlay(true);
+
+    // auto-disable play after short duration to avoid repeated layout thrash
+    // The duration is slightly longer than the stagger window to ensure animations finish
+    timerRef.current = window.setTimeout(() => {
+      setPlay(false);
+      timerRef.current = null;
+    }, Math.max(800, STAGGER_STEP * Math.min(itemCount, MAX_STAGGER_INDEX) * 1000 + 700));
   }, [isReady, itemCount, loadTick]);
 
   return { play, variant };

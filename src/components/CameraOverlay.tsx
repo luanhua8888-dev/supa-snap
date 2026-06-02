@@ -741,7 +741,7 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
 
           {/* Scrollable body — tránh đẩy nút Đăng ra ngoài màn hình */}
           <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden no-scrollbar">
-          <div className="relative flex flex-col items-center bg-[#101010] px-4 py-2">
+          <div className={`relative flex flex-col items-center ${previewUrl ? '' : 'justify-center'} bg-[#101010] px-4 py-2`}>
             {/* Flash Effect */}
             <AnimatePresence>
               {showFlash && (
@@ -991,7 +991,7 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
           />
 
           {/* Bottom — luôn cố định dưới cùng */}
-          <div className="px-4 pt-3 pb-6 z-20 bg-[#101010]/95 backdrop-blur-md border-t border-white/10 flex-shrink-0 safe-area-pb">
+          <div className="px-4 pt-4 pb-6 z-20 bg-[#101010]/95 backdrop-blur-md border-t border-white/10 flex-shrink-0 safe-area-pb">
             {!previewUrl && !cameraError && (
               <div className="flex justify-center mb-4">
                 <div className="flex p-1 rounded-2xl bg-white/8 border border-white/10">
@@ -1063,7 +1063,7 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
                 </motion.button>
               </div>
             ) : (
-              <div className="flex items-center justify-between px-6">
+              <div className="flex items-center justify-between px-4 max-w-[420px] mx-auto">
                 <motion.button
                   id="camera-gallery-btn"
                   whileHover={{ scale: 1.08 }}
@@ -1077,7 +1077,7 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
 
                 <div className="relative flex items-center justify-center">
                   <div
-                    className={`absolute w-22 h-22 rounded-full border pointer-events-none ${
+                    className={`absolute w-[96px] h-[96px] rounded-full border pointer-events-none ${
                       isRecording ? 'border-red-500 animate-pulse' : 'border-sky-500/60 shutter-pulse'
                     }`}
                   />
@@ -1088,7 +1088,7 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
                     whileTap={{ scale: 0.9 }}
                     onClick={handleShutter}
                     disabled={!!cameraError}
-                    className={`w-18 h-18 rounded-full border-4 flex items-center justify-center p-1 transition-all z-10 cursor-pointer ${
+                    className={`w-20 h-20 rounded-full border-4 flex items-center justify-center p-1 transition-all z-10 cursor-pointer ${
                       cameraError ? 'opacity-40 cursor-not-allowed border-white' : ''
                     } ${
                       captureMode === 'video'
@@ -1103,12 +1103,12 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
                       <div
                         className={`transition-all ${
                           isRecording
-                            ? 'w-7 h-7 bg-red-500 rounded-md'
-                            : 'w-full h-full bg-red-500 rounded-full hover:bg-red-400'
+                            ? 'w-9 h-9 bg-red-500 rounded-md'
+                            : 'w-10 h-10 bg-red-500 rounded-full hover:bg-red-400'
                         }`}
                       />
                     ) : (
-                      <div className="w-full h-full bg-white rounded-full hover:bg-slate-200 transition-colors" />
+                      <div className="w-12 h-12 bg-white rounded-full hover:bg-slate-200 transition-colors" />
                     )}
                   </motion.button>
                 </div>

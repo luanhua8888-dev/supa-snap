@@ -216,6 +216,7 @@ notify pgrst, 'reload schema';
 
 -- 1. Add status column to profiles table
 alter table public.profiles add column if not exists status text default '';
+alter table public.profiles add column if not exists last_seen_at timestamptz default timezone('utc'::text, now()) not null;
 
 -- 2. Follows table
 create table if not exists public.follows (
@@ -243,7 +244,8 @@ create table if not exists public.messages (
   sender_username text not null,
   receiver_username text not null,
   body text not null check (char_length(body) > 0 and char_length(body) <= 1000),
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  read_at timestamp with time zone
 );
 
 alter table public.messages enable row level security;
@@ -253,6 +255,9 @@ create policy "Allow public read messages" on public.messages for select using (
 
 drop policy if exists "Allow public insert messages" on public.messages;
 create policy "Allow public insert messages" on public.messages for insert with check (true);
+
+drop policy if exists "Allow public update messages" on public.messages;
+create policy "Allow public update messages" on public.messages for update with check (true);
 
 -- Enable realtime for follows and messages
 do $$
