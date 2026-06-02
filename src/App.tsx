@@ -123,6 +123,7 @@ export default function App() {
 
       if (profile?.username) setNickname(profile.username);
       setIsAdmin(isAdminUser(user, profile?.is_admin));
+      requestNotificationPermission();
     };
 
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -433,8 +434,15 @@ export default function App() {
             return [...prev, newMsg];
           });
 
-          if (newMsg.receiver_username.toLowerCase() === usernameLower && newMsg.sender_username.toLowerCase() !== usernameLower) {
-            showToast(`Tin nhắn mới từ ${newMsg.sender_username}! 💬`, 'info');
+          const receiver = newMsg.receiver_username?.trim().toLowerCase();
+          const sender = newMsg.sender_username?.trim().toLowerCase();
+          const currentUsername = usernameLower.trim();
+
+          if (receiver === currentUsername && sender !== currentUsername) {
+            const title = `Tin nhắn mới từ ${newMsg.sender_username || 'ai đó'}!`;
+            const body = newMsg.body || 'Bạn vừa nhận được tin nhắn mới.';
+            showToast(title, 'info');
+            sendBrowserNotification(title, body);
           }
         }
       )
@@ -614,6 +622,35 @@ export default function App() {
     }, 4000);
   };
 
+  const isAppVisible = () => {
+    if (typeof document === 'undefined' || !('visibilityState' in document)) {
+      return true;
+    }
+    return document.visibilityState === 'visible';
+  };
+
+  const sendBrowserNotification = (title: string, body: string) => {
+    if (!('Notification' in window)) return;
+    if (isAppVisible()) return;
+    if (Notification.permission === 'granted') {
+      new Notification(title, {
+        body,
+        icon: '/favicon.svg',
+      });
+    }
+  };
+
+  const requestNotificationPermission = () => {
+    if (!('Notification' in window)) return;
+    if (Notification.permission === 'default') {
+      Notification.requestPermission().then((permission) => {
+        if (permission === 'granted') {
+          showToast('Đã kích hoạt thông báo đẩy! 🔔', 'success');
+        }
+      });
+    }
+  };
+
   const handleToggleDark = () => {
     const nextDark = !isDark;
     setIsDark(nextDark);
@@ -623,11 +660,6 @@ export default function App() {
     } else {
       document.body.classList.remove('dark');
     }
-  };
-
-  const handleAuthSuccess = (userNickname: string) => {
-    setIsAuthModalOpen(false);
-    showToast(`Logged in as ${userNickname}! 💕`, 'success');
   };
 
   const handleLogout = async () => {
@@ -1479,7 +1511,6 @@ export default function App() {
         <AuthModal
           isOpen={isAuthModalOpen}
           onClose={() => setIsAuthModalOpen(false)}
-          onSuccess={handleAuthSuccess}
         />
 
         {/* Cute Toast notification popup */}

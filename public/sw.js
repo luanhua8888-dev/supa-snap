@@ -1,6 +1,7 @@
-const CACHE_NAME = 'supasnap-v1';
+const CACHE_NAME = 'supasnap-v2';
 const STATIC_ASSETS = [
   '/',
+  '/index.html',
   '/manifest.json',
   '/favicon.svg',
   '/icons/icon-192.png',
@@ -29,30 +30,39 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// Fetch: network-first strategy for API, cache-first for static
+const isNavigationRequest = (request, url) => {
+  return request.mode === 'navigate' || url.pathname === '/' || url.pathname.endsWith('.html');
+};
+
+const networkFirst = async (request) => {
+  try {
+    const response = await fetch(request);
+    if (response.ok) {
+      const cache = await caches.open(CACHE_NAME);
+      cache.put(request, response.clone());
+    }
+    return response;
+  } catch (error) {
+    return caches.match(request);
+  }
+};
+
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // Skip non-GET requests
   if (event.request.method !== 'GET') return;
 
-  // Never cache auth requests — prevents stale token issues
   if (url.pathname.includes('/auth/') || url.pathname.includes('/token')) return;
 
-  // Network-first for API calls and Supabase
-  if (url.hostname.includes('supabase') || url.hostname.includes('api.deezer')) {
-    event.respondWith(
-      fetch(event.request).catch(() => caches.match(event.request))
-    );
+  if (url.hostname.includes('supabase') || url.hostname.includes('api.deezer') || isNavigationRequest(event.request, url)) {
+    event.respondWith(networkFirst(event.request));
     return;
   }
 
-  // Cache-first for static assets, network fallback
   event.respondWith(
     caches.match(event.request).then((cached) => {
       if (cached) return cached;
       return fetch(event.request).then((response) => {
-        // Cache successful responses
         if (response.ok) {
           const clone = response.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));

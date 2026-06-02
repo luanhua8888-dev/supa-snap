@@ -41,10 +41,11 @@ export const ChatTab: React.FC<ChatTabProps> = ({
   // Unique list of users we have chatted with
   const chatPartners = useMemo(() => {
     const partners = new Set<string>();
+    const current = currentUser.toLowerCase();
+
     messages.forEach((msg) => {
       const sender = msg.sender_username.toLowerCase();
       const receiver = msg.receiver_username.toLowerCase();
-      const current = currentUser.toLowerCase();
 
       if (sender === current && receiver !== current) {
         partners.add(msg.receiver_username);
@@ -53,26 +54,27 @@ export const ChatTab: React.FC<ChatTabProps> = ({
       }
     });
 
-    // Add usernames that match search query if they are not already in list
-    const filteredSystemUsers = usernamesList.filter(
+    const normalizedSearch = searchQuery.trim().toLowerCase();
+    const searchResults = usernamesList.filter(
       (username) =>
-        username.toLowerCase() !== currentUser.toLowerCase() &&
-        username.toLowerCase().includes(searchQuery.toLowerCase())
+        username.toLowerCase() !== current &&
+        username.toLowerCase().includes(normalizedSearch)
     );
 
     const merged = Array.from(partners);
-    filteredSystemUsers.forEach((user) => {
-      if (!merged.some((u) => u.toLowerCase() === user.toLowerCase())) {
-        merged.push(user);
-      }
-    });
+    if (normalizedSearch) {
+      searchResults.forEach((user) => {
+        if (!merged.some((u) => u.toLowerCase() === user.toLowerCase())) {
+          merged.push(user);
+        }
+      });
+    }
 
-    return merged.filter((user) => {
-      if (searchQuery) {
-        return user.toLowerCase().includes(searchQuery.toLowerCase());
-      }
-      return true;
-    });
+    if (merged.length === 0) {
+      return searchResults;
+    }
+
+    return merged;
   }, [messages, currentUser, usernamesList, searchQuery]);
 
   // Last message and time for each partner

@@ -1,125 +1,26 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Mail, Lock, User, AlertCircle, Eye, EyeOff, AtSign } from 'lucide-react';
+import { X, Mail, Lock, AlertCircle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { getAdminEmails } from '../lib/admin';
 
 interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess: (nickname: string) => void;
 }
 
-export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess }) => {
-  const [isSignUp, setIsSignUp] = useState(false);
+export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [username, setUsername] = useState('');
-  const [loginId, setLoginId] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [authMode, setAuthMode] = useState<'password' | 'magic'>('password');
+  const [isSignup, setIsSignup] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [pendingConfirmEmail, setPendingConfirmEmail] = useState<string | null>(null);
-  const [isRecovering, setIsRecovering] = useState(false);
 
   const resetMessages = () => {
     setError(null);
     setInfo(null);
-  };
-
-  const handleResetPassword = async () => {
-    const target = loginId.trim();
-    if (!target) {
-      setError('Nhập email hoặc username để nhận link khôi phục.');
-      return;
-    }
-
-    setLoading(true);
-    resetMessages();
-
-    try {
-      const recoveryEmail = await resolveEmailFromLoginId(target);
-      const { error } = await supabase.auth.resetPasswordForEmail(recoveryEmail, {
-        redirectTo: `${window.location.origin}/`,
-      });
-
-      if (error) throw error;
-
-      setInfo(
-        `Đã gửi link khôi phục mật khẩu tới ${recoveryEmail}. Kiểm tra mail và làm theo hướng dẫn.`
-      );
-      setIsRecovering(false);
-      setPendingConfirmEmail(recoveryEmail);
-      setLoginId(recoveryEmail);
-      setPassword('');
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Không gửi được link khôi phục.';
-      setError(message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleResendConfirmation = async () => {
-    if (!pendingConfirmEmail) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const { error: resendError } = await supabase.auth.resend({
-        type: 'signup',
-        email: pendingConfirmEmail,
-        options: { emailRedirectTo: `${window.location.origin}/` },
-      });
-      if (resendError) throw resendError;
-      setInfo(
-        `Đã gửi lại tới ${pendingConfirmEmail}. Tìm mail từ Supabase Auth (All Mail / Spam).`
-      );
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Không gửi lại được email.';
-      setError(message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const resolveEmailFromLoginId = async (id: string): Promise<string> => {
-    const trimmed = id.trim();
-    if (trimmed.includes('@')) return trimmed.toLowerCase();
-
-    const { data, error: profileError } = await supabase
-      .from('profiles')
-      .select('email')
-      .eq('username', trimmed.toLowerCase())
-      .maybeSingle();
-
-    if (profileError) {
-      console.warn('profiles lookup:', profileError.message);
-    }
-    if (data?.email) return data.email;
-
-    throw new Error('Không tìm thấy tài khoản với username này.');
-  };
-
-  const isUnconfirmedEmailError = (message: string) => {
-    const text = message.toLowerCase();
-    return (
-      text.includes('confirm') ||
-      text.includes('verification') ||
-      text.includes('verified') ||
-      text.includes('not confirmed') ||
-      text.includes('unconfirmed')
-    );
-  };
-
-  const isRateLimitError = (message: string) => {
-    const text = message.toLowerCase();
-    return (
-      text.includes('rate limit') ||
-      text.includes('too many requests') ||
-      text.includes('limit exceeded') ||
-      text.includes('email rate limit')
-    );
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -128,109 +29,69 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
     setLoading(true);
 
     try {
-      if (isRecovering) {
-        await handleResetPassword();
-        return;
+      const trimmedEmail = email.trim().toLowerCase();
+      if (!trimmedEmail) {
+        throw new Error('Nhập email hợp lệ.');
       }
 
-      if (isSignUp) {
-        const trimmedUsername = username.trim().toLowerCase();
-        const trimmedEmail = email.trim().toLowerCase();
-
-        if (!/^[a-z0-9_]{3,20}$/.test(trimmedUsername)) {
-          throw new Error('Username: 3–20 ký tự, chữ thường, số và _');
-        }
-        if (password.length < 6) {
-          throw new Error('Mật khẩu tối thiểu 6 ký tự.');
-        }
-
-        const redirectTo = `${window.location.origin}/`;
-
-        const { data, error: signUpError } = await supabase.auth.signUp({
+      if (authMode === 'magic') {
+        const { error: signInError } = await supabase.auth.signInWithOtp({
           email: trimmedEmail,
-          password,
           options: {
-            emailRedirectTo: redirectTo,
-            data: {
-              nickname: trimmedUsername,
-              username: trimmedUsername,
-            },
+            emailRedirectTo: `${window.location.origin}/`,
           },
         });
 
-        if (signUpError) {
-          const message = signUpError.message?.toLowerCase?.() || '';
-          if (message.includes('already registered') || message.includes('already exists')) {
-            setIsSignUp(false);
-            setLoginId(trimmedEmail);
-            setPendingConfirmEmail(trimmedEmail);
-            setInfo(
-              `Email ${trimmedEmail} đã được đăng ký trước đó. Vui lòng đăng nhập và bấm "Gửi lại email xác nhận" nếu cần.`
-            );
-            return;
-          }
-          if (isRateLimitError(message)) {
-            setIsSignUp(false);
-            setLoginId(trimmedEmail);
-            setPendingConfirmEmail(trimmedEmail);
-            setError(
-              `Email xác nhận đã được gửi quá nhanh. Vui lòng đợi vài phút sau đó đăng nhập và bấm "Gửi lại email xác nhận".`
-            );
-            return;
-          }
-          throw signUpError;
-        }
-
-        if (data.user) {
-          const adminEmails = getAdminEmails();
-          await supabase.from('profiles').upsert({
-            id: data.user.id,
-            username: trimmedUsername,
-            email: trimmedEmail,
-            is_admin: adminEmails.includes(trimmedEmail),
-          });
-
-          if (data.session) {
-            setPendingConfirmEmail(null);
-            onSuccess(trimmedUsername);
-          } else {
-            setPendingConfirmEmail(trimmedEmail);
-            setIsSignUp(false);
-            setLoginId(trimmedUsername);
-            setPassword('');
-            setInfo(
-              `Đã gửi email tới ${trimmedEmail}. Xác nhận link trong mail Supabase Auth, sau đó đăng nhập bằng username "${trimmedUsername}" và mật khẩu vừa tạo.`
-            );
-          }
-        }
-      } else {
-        const loginEmail = await resolveEmailFromLoginId(loginId);
-
-        const { data, error: signInError } = await supabase.auth.signInWithPassword({
-          email: loginEmail,
-          password,
-        });
-
         if (signInError) {
-          if (isUnconfirmedEmailError(signInError.message || '')) {
-            setPendingConfirmEmail(loginEmail);
-            throw new Error(
-              'Email chưa xác nhận. Mở mail Supabase Auth và bấm link, hoặc bấm "Gửi lại email" bên dưới.'
-            );
-          }
           throw signInError;
         }
 
-        if (data.user) {
-          const displayName =
-            data.user.user_metadata?.nickname ||
-            data.user.user_metadata?.username ||
-            loginId.split('@')[0];
-          onSuccess(displayName);
+        setInfo(
+          `Đã gửi link đăng nhập tới ${trimmedEmail}. Mở mail và bấm vào link để tiếp tục.`
+        );
+        return;
+      }
+
+      if (!password) {
+        throw new Error('Nhập mật khẩu.');
+      }
+
+      if (isSignup) {
+        if (password !== confirmPassword) {
+          throw new Error('Mật khẩu và xác nhận mật khẩu phải trùng nhau.');
         }
+
+        const { error: signUpError } = await supabase.auth.signUp({
+          email: trimmedEmail,
+          password,
+        });
+
+        if (signUpError) {
+          throw signUpError;
+        }
+
+        setInfo(
+          'Tài khoản đã được tạo. Nếu cần xác nhận email, kiểm tra hộp thư để hoàn tất đăng ký.'
+        );
+        return;
+      }
+
+      const { data, error: signInError } = await supabase.auth.signInWithPassword({
+        email: trimmedEmail,
+        password,
+      });
+
+      if (signInError) {
+        throw signInError;
+      }
+
+      if (data.user) {
+        setInfo('Đăng nhập thành công!');
+        setTimeout(() => {
+          handleClose();
+        }, 500);
       }
     } catch (err: unknown) {
-      console.error('Auth error:', err);
       const message = err instanceof Error ? err.message : 'Lỗi xác thực.';
       setError(message);
     } finally {
@@ -238,11 +99,52 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
     }
   };
 
+  const handleResendLink = async () => {
+    resetMessages();
+    setLoading(true);
+
+    try {
+      const trimmedEmail = email.trim().toLowerCase();
+      if (!trimmedEmail) {
+        throw new Error('Nhập email để nhận link đăng nhập.');
+      }
+
+      const { error: resendError } = await supabase.auth.signInWithOtp({
+        email: trimmedEmail,
+        options: {
+          emailRedirectTo: `${window.location.origin}/`,
+        },
+      });
+
+      if (resendError) {
+        throw resendError;
+      }
+
+      setInfo(
+        `Đã gửi lại link đăng nhập tới ${trimmedEmail}. Kiểm tra mail và mở link.`
+      );
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Lỗi gửi lại link.';
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleClose = () => {
+    resetMessages();
+    setEmail('');
+    setPassword('');
+    setConfirmPassword('');
+    setIsSignup(false);
+    onClose();
+  };
+
   return (
     <AnimatePresence>
       {isOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#0a0708]/30 backdrop-blur-lg dark:bg-black/75">
-          <div className="absolute inset-0" onClick={onClose} />
+          <div className="absolute inset-0" onClick={handleClose} />
           <div className="absolute w-64 h-64 rounded-full bg-black/15 blur-3xl pointer-events-none" />
 
           <motion.div
@@ -252,7 +154,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
             className="relative w-full max-w-sm p-7 bg-black/90 dark:bg-black/90 backdrop-blur-xl rounded-[2.5rem] shadow-2xl border border-gray-700/40 dark:border-gray-800 z-10 max-h-[90vh] overflow-y-auto no-scrollbar"
           >
             <button
-              onClick={onClose}
+              onClick={handleClose}
               className="absolute top-5 right-5 p-2 rounded-full hover:bg-gray-800 dark:hover:bg-gray-800 text-gray-400"
             >
               <X className="w-4 h-4" />
@@ -262,102 +164,88 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
               <img src="/favicon.svg" alt="" className="w-14 h-14 rounded-2xl shadow-md" />
               <div>
                 <h2 className="text-2xl font-black font-rounded text-white dark:text-white">
-                  {isRecovering ? 'Khôi phục tài khoản' : isSignUp ? 'Đăng ký' : 'Đăng nhập'}
+                  {authMode === 'magic'
+                    ? 'Đăng nhập bằng email'
+                    : isSignup
+                    ? 'Đăng ký tài khoản'
+                    : 'Đăng nhập bằng mật khẩu'}
                 </h2>
                 <p className="text-xs text-gray-400 dark:text-gray-500 mt-1 max-w-[240px] mx-auto">
-                  {isRecovering
-                    ? 'Nhập email hoặc username để nhận link khôi phục mật khẩu.'
-                    : isSignUp
-                    ? 'Email + username — xác nhận qua email rồi đăng nhập'
-                    : 'Username hoặc email + mật khẩu'}
+                  {authMode === 'magic'
+                    ? 'Nhập email để nhận link đăng nhập. Không cần mật khẩu.'
+                    : isSignup
+                    ? 'Tạo tài khoản mới với email và mật khẩu.'
+                    : 'Đăng nhập với email và mật khẩu của bạn.'}
                 </p>
               </div>
 
-              <form onSubmit={handleSubmit} className="w-full space-y-3.5 text-left">
-                {isRecovering ? (
-                  <Field label="Username hoặc Email" icon={<AtSign className="w-4 h-4" />}>
-                    <input
-                      type="text"
-                      placeholder="username hoặc email"
-                      value={loginId}
-                      onChange={(e) => setLoginId(e.target.value)}
-                      required
-                      className={inputClass}
-                    />
-                  </Field>
-                ) : isSignUp ? (
-                  <>
-                    <Field label="Username" icon={<User className="w-4 h-4" />}>
-                      <input
-                        type="text"
-                        placeholder="luanhua123"
-                        value={username}
-                        onChange={(e) => setUsername(e.target.value.toLowerCase())}
-                        required
-                        maxLength={20}
-                        className={inputClass}
-                      />
-                    </Field>
-                    <Field label="Email" icon={<Mail className="w-4 h-4" />}>
-                      <input
-                        type="email"
-                        placeholder="ban@email.com"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        required
-                        className={inputClass}
-                      />
-                    </Field>
-                  </>
-                ) : (
-                  <Field label="Username hoặc Email" icon={<AtSign className="w-4 h-4" />}>
-                    <input
-                      type="text"
-                      placeholder="username hoặc email"
-                      value={loginId}
-                      onChange={(e) => setLoginId(e.target.value)}
-                      required
-                      className={inputClass}
-                    />
-                  </Field>
-                )}
+              <div className="flex items-center justify-center gap-2 text-[10px] uppercase tracking-[0.18em] text-gray-400">
+                <button
+                  type="button"
+                  onClick={() => setAuthMode('password')}
+                  className={`px-3 py-2 rounded-2xl transition ${
+                    authMode === 'password'
+                      ? 'bg-white/10 text-white'
+                      : 'hover:bg-white/5 text-gray-400'
+                  }`}
+                >
+                  Mật khẩu
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAuthMode('magic')}
+                  className={`px-3 py-2 rounded-2xl transition ${
+                    authMode === 'magic'
+                      ? 'bg-white/10 text-white'
+                      : 'hover:bg-white/5 text-gray-400'
+                  }`}
+                >
+                  Link email
+                </button>
+              </div>
 
-                {!isRecovering && (
-                  <Field label="Mật khẩu" icon={<Lock className="w-4 h-4" />}>
-                    <div className="relative">
+              <form onSubmit={handleSubmit} className="w-full space-y-3.5 text-left">
+                <Field label="Email" icon={<Mail className="w-4 h-4" />}>
+                  <input
+                    type="email"
+                    placeholder="ban@email.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                    className={inputClass}
+                  />
+                </Field>
+
+                {authMode === 'password' && (
+                  <>
+                    <Field label="Mật khẩu" icon={<Lock className="w-4 h-4" />}>
                       <input
-                        type={showPassword ? 'text' : 'password'}
-                        placeholder="••••••••"
+                        type="password"
+                        placeholder="Mật khẩu"
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
                         required
-                        className={`${inputClass} pr-12`}
+                        className={inputClass}
                       />
-                      <button
-                        type="button"
-                        onClick={() => setShowPassword((v) => !v)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-gray-400 hover:text-gray-300 cursor-pointer"
-                        aria-label={showPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
-                      >
-                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                      </button>
-                    </div>
-                  </Field>
+                    </Field>
+
+                    {isSignup && (
+                      <Field label="Xác nhận mật khẩu" icon={<Lock className="w-4 h-4" />}>
+                        <input
+                          type="password"
+                          placeholder="Xác nhận mật khẩu"
+                          value={confirmPassword}
+                          onChange={(e) => setConfirmPassword(e.target.value)}
+                          required
+                          className={inputClass}
+                        />
+                      </Field>
+                    )}
+                  </>
                 )}
 
                 {error && <AlertBox tone="error" text={error} />}
                 {info && <AlertBox tone="info" text={info} />}
-
-                {pendingConfirmEmail && !isRecovering && (
-                  <button
-                    type="button"
-                    disabled={loading}
-                    onClick={handleResendConfirmation}
-                    className="w-full py-2.5 text-xs font-bold font-rounded text-gray-300 hover:text-white border border-gray-600/50 dark:border-gray-700/50 rounded-xl cursor-pointer disabled:opacity-50"
-                  >
-                    Gửi lại email xác nhận
-                  </button>
-                )}
 
                 <motion.button
                   whileTap={{ scale: 0.98 }}
@@ -367,74 +255,43 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
                 >
                   {loading ? (
                     <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin mx-auto" />
+                  ) : authMode === 'magic' ? (
+                    <span>Gửi link đăng nhập</span>
+                  ) : isSignup ? (
+                    <span>Tạo tài khoản</span>
                   ) : (
-                    <span>
-                      {isRecovering ? 'Gửi link khôi phục' : isSignUp ? 'Đăng ký ✨' : 'Đăng nhập 🔒'}
-                    </span>
+                    <span>Đăng nhập</span>
                   )}
                 </motion.button>
+
+                {authMode === 'password' ? (
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={() => setIsSignup((prev) => !prev)}
+                    className="w-full py-2.5 text-xs font-bold font-rounded text-gray-300 hover:text-white border border-gray-600/50 dark:border-gray-700/50 rounded-xl cursor-pointer disabled:opacity-50"
+                  >
+                    {isSignup ? 'Đã có tài khoản? Đăng nhập' : 'Chưa có tài khoản? Đăng ký'}
+                  </button>
+                ) : (
+                  info && (
+                    <button
+                      type="button"
+                      disabled={loading}
+                      onClick={handleResendLink}
+                      className="w-full py-2.5 text-xs font-bold font-rounded text-gray-300 hover:text-white border border-gray-600/50 dark:border-gray-700/50 rounded-xl cursor-pointer disabled:opacity-50"
+                    >
+                      Gửi lại link đăng nhập
+                    </button>
+                  )
+                )}
               </form>
 
-              <p className="text-xs text-gray-400">
-                {isRecovering ? (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsRecovering(false);
-                        resetMessages();
-                      }}
-                      className="text-gray-300 font-bold hover:underline cursor-pointer"
-                    >
-                      Quay lại đăng nhập
-                    </button>
-                  </>
-                ) : isSignUp ? (
-                  <>
-                    Đã có tài khoản?{' '}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsRecovering(false);
-                        setIsSignUp(false);
-                        setPendingConfirmEmail(null);
-                        resetMessages();
-                      }}
-                      className="text-gray-300 font-bold hover:underline cursor-pointer"
-                    >
-                      Đăng nhập
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsSignUp(false);
-                        setIsRecovering(true);
-                        resetMessages();
-                      }}
-                      className="text-gray-300 font-bold hover:underline cursor-pointer"
-                    >
-                      Quên mật khẩu?
-                    </button>
-                    {' • '}
-                    Chưa có tài khoản?{' '}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsRecovering(false);
-                        setIsSignUp(true);
-                        setPendingConfirmEmail(null);
-                        resetMessages();
-                      }}
-                      className="text-gray-300 font-bold hover:underline cursor-pointer"
-                    >
-                      Đăng ký
-                    </button>
-                  </>
-                )}
-              </p>
+              {authMode === 'password' && (
+                <p className="text-xs text-gray-400">
+                  Hoặc đăng nhập bằng link email nếu bạn muốn tránh mật khẩu.
+                </p>
+              )}
             </div>
           </motion.div>
         </div>
