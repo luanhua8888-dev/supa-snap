@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Camera, Compass, X, Search, User, MessageSquare, LayoutGrid, List } from 'lucide-react';
 import { isAdminUser } from './lib/admin';
@@ -8,9 +8,6 @@ import { Logo } from './components/Logo';
 import { PhotoCard } from './components/PhotoCard';
 import type { PhotoData } from './components/PhotoCard';
 import type { Comment } from './types/comment';
-import { CameraOverlay } from './components/CameraOverlay';
-import { ProfileTab } from './components/ProfileTab';
-import { ChatTab } from './components/ChatTab';
 import type { ChatMessage } from './components/ChatTab';
 import { GalleryThumb } from './components/GalleryThumb';
 import {
@@ -20,8 +17,6 @@ import {
   isStorageMimeError,
   type MediaType,
 } from './lib/media';
-import { AuthModal } from './components/AuthModal';
-import { ConfirmDialog } from './components/ConfirmDialog';
 import {
   CinematicFeedLoader,
   FeedEntranceList,
@@ -32,6 +27,13 @@ import {
 } from './components/FeedEntrance';
 import { playSnapMusic, stopSnapMusic } from './lib/snapMusic';
 import { blobFingerprint, isDuplicateUpload, markUploadPosted } from './lib/uploadDedup';
+
+// Lazy load heavy components for better initial load performance
+const CameraOverlay = lazy(() => import('./components/CameraOverlay').then(m => ({ default: m.CameraOverlay })));
+const ProfileTab = lazy(() => import('./components/ProfileTab').then(m => ({ default: m.ProfileTab })));
+const ChatTab = lazy(() => import('./components/ChatTab').then(m => ({ default: m.ChatTab })));
+const AuthModal = lazy(() => import('./components/AuthModal').then(m => ({ default: m.AuthModal })));
+const ConfirmDialog = lazy(() => import('./components/ConfirmDialog').then(m => ({ default: m.ConfirmDialog })));
 
 export default function App() {
   const [sessionUser, setSessionUser] = useState<any>(null);
@@ -531,8 +533,8 @@ export default function App() {
             console.debug('realtime new message fields introspect failed', e);
           }
           try {
-            const rr = (newMsg.receiver_username || newMsg.receiver || '').toString();
-            const ss = (newMsg.sender_username || newMsg.sender || '').toString();
+            const rr = (newMsg.receiver_username || (newMsg as any).receiver || '').toString();
+            const ss = (newMsg.sender_username || (newMsg as any).sender || '').toString();
             console.debug('realtime new message meta', { receiver_raw: rr, sender_raw: ss, Notification_permission: Notification.permission, visibility: document.visibilityState });
           } catch (e) {
             console.debug('realtime debug meta failed', e);
@@ -1443,11 +1445,11 @@ export default function App() {
   }, [photos, galleryUserFilter, friendSearch]);
 
   return (
-    <div className="min-h-screen w-full bg-[#f4eff2] dark:bg-threads-bg text-slate-800 dark:text-threads-text flex items-center justify-center p-0 sm:p-4 md:p-6 transition-colors duration-500 relative overflow-hidden font-sans">
+    <div className="fixed inset-0 w-full bg-[#f4eff2] dark:bg-threads-bg text-slate-800 dark:text-threads-text flex items-center justify-center p-0 sm:p-4 md:p-6 transition-colors duration-500 overflow-hidden font-sans">
       <div className="absolute top-[-15%] left-[-15%] w-[60%] h-[60%] rounded-full bg-gradient-to-tr from-pink-500/10 to-indigo-500/5 blur-[130px] pointer-events-none ambient-blob dark:opacity-0" />
       <div className="absolute bottom-[-15%] right-[-15%] w-[60%] h-[60%] rounded-full bg-gradient-to-br from-violet-500/10 to-rose-500/5 blur-[130px] pointer-events-none ambient-blob-reverse dark:opacity-0" />
 
-      <div className="w-full h-screen sm:h-[830px] sm:max-w-[395px] sm:rounded-[3.2rem] sm:border-[10px] sm:border-slate-900/90 dark:sm:border-threads-border sm:shadow-[0_25px_60px_-15px_rgba(0,0,0,0.65)] bg-[#faf6f8] dark:bg-threads-bg overflow-hidden flex flex-col relative transition-all duration-500">
+      <div className="w-full h-full sm:h-[830px] sm:max-h-[calc(100dvh-2rem)] sm:max-w-[395px] sm:rounded-[3.2rem] sm:border-[10px] sm:border-slate-900/90 dark:sm:border-threads-border sm:shadow-[0_25px_60px_-15px_rgba(0,0,0,0.65)] bg-[#faf6f8] dark:bg-threads-bg overflow-hidden flex flex-col relative transition-all duration-500">
 
 
 
@@ -1551,23 +1553,25 @@ export default function App() {
           {activeTab === 'chat' && sessionUser ? (
             /* Chat tab view directly under main (not inside scrollable wrapper) */
             <div className="flex-1 min-h-0 flex flex-col overflow-hidden p-3 pb-6">
-              <ChatTab
-                currentUser={nickname || 'anonymous'}
-                userAvatars={userAvatars}
-                messages={chatMessages}
-                onSendMessage={handleSendMessage}
-                usernamesList={usernamesList}
-                activeRecipient={chatActiveRecipient}
-                onSelectRecipient={(recipient) => {
-                  if (recipient) {
-                    void markThreadRead(recipient);
-                  }
-                  setChatActiveRecipient(recipient);
-                }}
-                unreadCounts={unreadMessagesBySender}
-                readCutoffs={readCutoffs}
-                userStatuses={userProfiles}
-              />
+              <Suspense fallback={<div className="flex-1 flex items-center justify-center text-slate-400 dark:text-zinc-550 font-rounded text-sm">Đang tải cuộc trò chuyện...</div>}>
+                <ChatTab
+                  currentUser={nickname || 'anonymous'}
+                  userAvatars={userAvatars}
+                  messages={chatMessages}
+                  onSendMessage={handleSendMessage}
+                  usernamesList={usernamesList}
+                  activeRecipient={chatActiveRecipient}
+                  onSelectRecipient={(recipient) => {
+                    if (recipient) {
+                      void markThreadRead(recipient);
+                    }
+                    setChatActiveRecipient(recipient);
+                  }}
+                  unreadCounts={unreadMessagesBySender}
+                  readCutoffs={readCutoffs}
+                  userStatuses={userProfiles}
+                />
+              </Suspense>
             </div>
           ) : (
             <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden pb-3 main-scroll-pad no-scrollbar">
@@ -1697,22 +1701,24 @@ export default function App() {
                     </motion.button>
                   </div>
                 ) : (
-                  <ProfileTab
-                    nickname={nickname || ''}
-                    email={sessionUser?.email || ''}
-                    avatarUrl={userAvatars[nickname?.toLowerCase() || ''] || null}
-                    status={status}
-                    followersCount={followersCount}
-                    likesCount={totalLikesCount}
-                    followingCount={followingList.length}
-                    userPhotos={userPhotos}
-                    onUpdateProfile={handleUpdateProfile}
-                    onLogout={handleLogout}
-                    showToast={showToast}
-                    isDark={isDark}
-                    onToggleDark={handleToggleDark}
-                    onSelectPhoto={setSelectedPhoto}
-                  />
+                  <Suspense fallback={<div className="py-20 text-center text-slate-400 dark:text-zinc-550 font-rounded text-sm">Đang tải hồ sơ...</div>}>
+                    <ProfileTab
+                      nickname={nickname || ''}
+                      email={sessionUser?.email || ''}
+                      avatarUrl={userAvatars[nickname?.toLowerCase() || ''] || null}
+                      status={status}
+                      followersCount={followersCount}
+                      likesCount={totalLikesCount}
+                      followingCount={followingList.length}
+                      userPhotos={userPhotos}
+                      onUpdateProfile={handleUpdateProfile}
+                      onLogout={handleLogout}
+                      showToast={showToast}
+                      isDark={isDark}
+                      onToggleDark={handleToggleDark}
+                      onSelectPhoto={setSelectedPhoto}
+                    />
+                  </Suspense>
                 )
               )}
             </div>
@@ -1919,29 +1925,35 @@ export default function App() {
           </div>
         </div>
         {/* Camera sheet popup */}
-        <CameraOverlay
-          isOpen={isCameraOpen}
-          onClose={() => setIsCameraOpen(false)}
-          onUpload={handlePhotoUpload}
-          isUploading={isUploading}
-        />
+        <Suspense fallback={null}>
+          <CameraOverlay
+            isOpen={isCameraOpen}
+            onClose={() => setIsCameraOpen(false)}
+            onUpload={handlePhotoUpload}
+            isUploading={isUploading}
+          />
+        </Suspense>
 
         {/* Authentication Modal */}
         {photoToDelete && (
-          <ConfirmDialog
-            title="Xóa snap?"
-            message="Bài và bình luận sẽ bị xóa vĩnh viễn. (Admin)"
-            confirmLabel="Xóa"
-            isLoading={isDeletingPhoto}
-            onCancel={() => !isDeletingPhoto && setPhotoToDelete(null)}
-            onConfirm={() => handleDeletePhoto(photoToDelete)}
-          />
+          <Suspense fallback={null}>
+            <ConfirmDialog
+              title="Xóa snap?"
+              message="Bài và bình luận sẽ bị xóa vĩnh viễn. (Admin)"
+              confirmLabel="Xóa"
+              isLoading={isDeletingPhoto}
+              onCancel={() => !isDeletingPhoto && setPhotoToDelete(null)}
+              onConfirm={() => handleDeletePhoto(photoToDelete)}
+            />
+          </Suspense>
         )}
 
-        <AuthModal
-          isOpen={isAuthModalOpen}
-          onClose={() => setIsAuthModalOpen(false)}
-        />
+        <Suspense fallback={null}>
+          <AuthModal
+            isOpen={isAuthModalOpen}
+            onClose={() => setIsAuthModalOpen(false)}
+          />
+        </Suspense>
 
         {/* Cute Toast notification popup */}
         <AnimatePresence>

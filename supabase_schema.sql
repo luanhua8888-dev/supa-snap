@@ -217,6 +217,7 @@ notify pgrst, 'reload schema';
 -- 1. Add status column to profiles table
 alter table public.profiles add column if not exists status text default '';
 alter table public.profiles add column if not exists last_seen_at timestamptz default timezone('utc'::text, now()) not null;
+alter table public.profiles add column if not exists avatar_url text;
 
 -- 2. Follows table
 create table if not exists public.follows (
