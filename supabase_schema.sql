@@ -219,6 +219,23 @@ alter table public.profiles add column if not exists status text default '';
 alter table public.profiles add column if not exists last_seen_at timestamptz default timezone('utc'::text, now()) not null;
 alter table public.profiles add column if not exists avatar_url text;
 
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_publication_rel pr
+    join pg_publication p on p.oid = pr.prpubid
+    join pg_class c on c.oid = pr.prrelid
+    where p.pubname = 'supabase_realtime' and c.relname = 'profiles'
+  ) then
+    alter publication supabase_realtime add table public.profiles;
+  end if;
+exception
+  when others then
+    raise notice 'Could not add profiles to realtime: %', sqlerrm;
+end;
+$$;
+
 -- 2. Follows table
 create table if not exists public.follows (
   id uuid default gen_random_uuid() primary key,
@@ -248,6 +265,8 @@ create table if not exists public.messages (
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
   read_at timestamp with time zone
 );
+
+alter table public.messages add column if not exists read_at timestamp with time zone;
 
 alter table public.messages enable row level security;
 

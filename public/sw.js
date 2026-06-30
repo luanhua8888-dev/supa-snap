@@ -1,4 +1,4 @@
-const CACHE_NAME = 'supasnap-v2';
+const CACHE_NAME = 'supasnap-v3';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -43,7 +43,8 @@ const networkFirst = async (request) => {
     }
     return response;
   } catch (error) {
-    return caches.match(request);
+    const cached = await caches.match(request);
+    return cached || Response.error();
   }
 };
 
@@ -54,7 +55,9 @@ self.addEventListener('fetch', (event) => {
 
   if (url.pathname.includes('/auth/') || url.pathname.includes('/token')) return;
 
-  if (url.hostname.includes('supabase') || url.hostname.includes('api.deezer') || isNavigationRequest(event.request, url)) {
+  if (url.origin !== self.location.origin) return;
+
+  if (isNavigationRequest(event.request, url)) {
     event.respondWith(networkFirst(event.request));
     return;
   }
@@ -68,7 +71,7 @@ self.addEventListener('fetch', (event) => {
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
         }
         return response;
-      });
+      }).catch(() => Response.error());
     })
   );
 });

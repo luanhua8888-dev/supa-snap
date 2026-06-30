@@ -58,8 +58,13 @@ export default function App() {
   const [unreadMessagesBySender, setUnreadMessagesBySender] = useState<Record<string, number>>({});
   const [unreadConversationsCount, setUnreadConversationsCount] = useState(0);
   const [totalUnreadMessages, setTotalUnreadMessages] = useState(0);
+  const [chatPresenceUsers, setChatPresenceUsers] = useState<Record<string, boolean>>({});
+  const [recentActiveUsers, setRecentActiveUsers] = useState<Record<string, string>>({});
   const [readCutoffs, setReadCutoffs] = useState<Record<string, string>>({});
   const readCutoffsRef = useRef<Record<string, string>>({});
+  const activeTabRef = useRef(activeTab);
+  const chatActiveRecipientRef = useRef<string | null>(null);
+  const sessionUserRef = useRef<any>(null);
 
   useEffect(() => {
     readCutoffsRef.current = readCutoffs || {};
@@ -81,6 +86,18 @@ export default function App() {
   const [photoToDelete, setPhotoToDelete] = useState<string | null>(null);
   const [isDeletingPhoto, setIsDeletingPhoto] = useState(false);
   const lastPhotosFetchRef = useRef<number>(0);
+
+  useEffect(() => {
+    activeTabRef.current = activeTab;
+  }, [activeTab]);
+
+  useEffect(() => {
+    chatActiveRecipientRef.current = chatActiveRecipient;
+  }, [chatActiveRecipient]);
+
+  useEffect(() => {
+    sessionUserRef.current = sessionUser;
+  }, [sessionUser]);
 
   const { play: playFeedEntrance, variant: entranceVariant } = useFeedEntrance(
     photos.length,
@@ -288,16 +305,20 @@ export default function App() {
   const fetchUserAvatars = async () => {
     try {
       let profilesData: any[] = [];
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('username, avatar_url, last_seen_at, status');
-      
-      if (!error && data) {
-        profilesData = data;
-      } else {
-        console.warn('profiles select error or no avatar_url:', error?.message);
-        const { data: fallbackData } = await supabase.from('profiles').select('username');
-        profilesData = fallbackData || [];
+      const profileSelects = [
+        'username, avatar_url, last_seen_at, status',
+        'username, last_seen_at, status',
+        'username, last_seen_at',
+        'username',
+      ];
+
+      for (const columns of profileSelects) {
+        const { data, error } = await supabase.from('profiles').select(columns);
+        if (!error && data) {
+          profilesData = data;
+          break;
+        }
+        console.warn(`profiles select failed (${columns}):`, error?.message);
       }
 
       const avatarMap: Record<string, string> = {};
@@ -322,33 +343,108 @@ export default function App() {
     }
   };
 
+  useEffect(() => {
+    if (activeTab !== 'chat') return;
+
+    void fetchUserAvatars();
+    const profileStatusInterval = window.setInterval(() => {
+      void fetchUserAvatars();
+    }, 15000);
+
+    return () => {
+      window.clearInterval(profileStatusInterval);
+    };
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (!nickname) {
+      setChatPresenceUsers({});
+      return;
+    }
+
+    const username = nickname.toLowerCase();
+    const presenceKey = `${username}-${sessionUserRef.current?.id || 'guest'}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const channel = supabase.channel('app-presence', {
+      config: {
+        presence: {
+          key: presenceKey,
+        },
+      },
+    });
+
+    const syncPresence = () => {
+      const state = channel.presenceState();
+      const onlineUsers: Record<string, boolean> = {};
+
+      Object.values(state).forEach((presences) => {
+        presences.forEach((presence: any) => {
+          const presenceUsername = String(presence?.username || presence?.user || '').trim().toLowerCase();
+          if (presenceUsername) {
+            onlineUsers[presenceUsername] = true;
+          }
+        });
+      });
+
+      setChatPresenceUsers(onlineUsers);
+    };
+
+    channel
+      .on('presence', { event: 'sync' }, syncPresence)
+      .on('presence', { event: 'join' }, syncPresence)
+      .on('presence', { event: 'leave' }, syncPresence)
+      .subscribe(async (status) => {
+        if (status !== 'SUBSCRIBED') return;
+
+        await channel.track({
+          username,
+          online_at: new Date().toISOString(),
+        });
+        syncPresence();
+      });
+
+    return () => {
+      setChatPresenceUsers({});
+      supabase.removeChannel(channel);
+    };
+  }, [nickname]);
+
   const handleUpdateProfile = async (newNickname: string, newAvatar: string, newStatus: string) => {
     if (!sessionUser) return;
 
     const cleanNickname = newNickname.trim().toLowerCase();
 
-    // 1. Update in Supabase profiles
+    // 1. Update in Supabase profiles. Try narrower payloads because older databases may
+    // not have every optional profile column yet.
     try {
-      const { error } = await supabase
-        .from('profiles')
-        .update({
+      const profileUpdates = [
+        {
           username: cleanNickname,
           avatar_url: newAvatar,
           status: newStatus,
-        })
-        .eq('id', sessionUser.id);
+        },
+        {
+          username: cleanNickname,
+          status: newStatus,
+        },
+        {
+          username: cleanNickname,
+        },
+      ];
 
-      if (error) {
-        // Fallback if status or other column does not exist
-        const { error: fallbackErr } = await supabase
+      let lastError: unknown = null;
+      for (const update of profileUpdates) {
+        const { error } = await supabase
           .from('profiles')
-          .update({
-            username: cleanNickname,
-            avatar_url: newAvatar,
-          })
+          .update(update)
           .eq('id', sessionUser.id);
-        if (fallbackErr) throw fallbackErr;
+        if (!error) {
+          lastError = null;
+          break;
+        }
+        lastError = error;
       }
+
+      if (lastError) throw lastError;
     } catch (err: any) {
       console.warn('Database profiles update skipped/failed:', err?.message);
     }
@@ -363,6 +459,15 @@ export default function App() {
     setUserAvatars((prev) => ({
       ...prev,
       [cleanNickname]: newAvatar,
+    }));
+    setUserProfiles((prev) => ({
+      ...prev,
+      [cleanNickname]: {
+        ...(prev[cleanNickname] || {}),
+        avatar_url: newAvatar,
+        status: newStatus,
+        last_seen_at: new Date().toISOString(),
+      },
     }));
 
     await fetchPhotos();
@@ -480,28 +585,38 @@ export default function App() {
     fetchStats();
     fetchChatMessages();
 
-    const updateFocusSeen = () => {
-      if (sessionUser) {
-        void supabase
-          .from('profiles')
-          .update({ last_seen_at: new Date().toISOString() })
-          .eq('id', sessionUser.id);
-        try {
-          const key = usernameLower;
-          setUserProfiles((prev) => ({
-            ...prev,
-            [key]: {
-              ...(prev[key] || {}),
-              last_seen_at: new Date().toISOString(),
-            },
-          }));
-        } catch (e) {
-          // ignore
-        }
-      }
+    const updateLastSeen = () => {
+      const currentSessionUser = sessionUserRef.current;
+      if (!currentSessionUser) return;
+
+      const lastSeenAt = new Date().toISOString();
+      void supabase
+        .from('profiles')
+        .update({ last_seen_at: lastSeenAt })
+        .eq('id', currentSessionUser.id)
+        .then(({ error }) => {
+          if (error) {
+            console.warn('Could not update online status:', error.message);
+          }
+        });
+
+      setUserProfiles((prev) => ({
+        ...prev,
+        [usernameLower]: {
+          ...(prev[usernameLower] || {}),
+          last_seen_at: lastSeenAt,
+        },
+      }));
     };
 
-    window.addEventListener('focus', updateFocusSeen);
+    const handleVisibilityChange = () => {
+      updateLastSeen();
+    };
+
+    updateLastSeen();
+    const lastSeenInterval = window.setInterval(updateLastSeen, 30000);
+    window.addEventListener('focus', updateLastSeen);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     // Messages channel
     const messagesChannel = supabase
@@ -550,6 +665,19 @@ export default function App() {
 
           setChatMessages((prev) => {
             if (prev.some((m) => m.id === normalizedMsg.id)) return prev;
+
+            const matchingTemp = prev.find((m) =>
+              m.id.startsWith('temp-msg-') &&
+              m.sender_username.toLowerCase() === normalizedMsg.sender_username.toLowerCase() &&
+              m.receiver_username.toLowerCase() === normalizedMsg.receiver_username.toLowerCase() &&
+              m.body === normalizedMsg.body &&
+              Math.abs(Date.parse(m.created_at || '') - Date.parse(normalizedMsg.created_at || '')) < 15000
+            );
+
+            if (matchingTemp) {
+              return prev.map((m) => (m.id === matchingTemp.id ? normalizedMsg : m));
+            }
+
             return [...prev, normalizedMsg];
           });
 
@@ -558,28 +686,37 @@ export default function App() {
           const senderRaw = (normalizedMsg.sender_username || (normalizedMsg as any).sender || (normalizedMsg as any).sender_user_id || '').toString();
           const receiver = (receiverRaw || '').trim().toLowerCase();
           const sender = (senderRaw || '').trim().toLowerCase();
+          if (sender) {
+            setRecentActiveUsers((prev) => ({
+              ...prev,
+              [sender]: new Date().toISOString(),
+            }));
+          }
           const fallbackNick = (localStorage.getItem('supasnap_nickname') || '').toString().toLowerCase();
           const sessionMetaNick = (sessionUser?.user_metadata?.nickname || sessionUser?.user_metadata?.username || '').toString().toLowerCase();
           const currentUsername = ((nickname || fallbackNick || sessionMetaNick) || '').toString().trim().toLowerCase();
 
-          console.debug('message handler vars', { receiver, sender, currentUsername, sessionUserId: sessionUser?.id });
+          console.debug('message handler vars', { receiver, sender, currentUsername, sessionUserId: sessionUserRef.current?.id });
 
           const incomingForCurrentUser =
             (receiver && currentUsername && receiver === currentUsername) ||
-            (sessionUser && (String((newMsg as any).receiver_user_id || '').toLowerCase() === String(sessionUser.id).toLowerCase()));
+            (sessionUserRef.current && (String((newMsg as any).receiver_user_id || '').toLowerCase() === String(sessionUserRef.current.id).toLowerCase()));
 
           if (incomingForCurrentUser && sender && sender !== currentUsername) {
             const title = `Tin nhắn mới từ ${newMsg.sender_username || 'ai đó'}!`;
             const body = newMsg.body || 'Bạn vừa nhận được tin nhắn mới.';
-            console.debug('incoming message for current user; showing toast/notification', { title, body, Notification_permission: Notification.permission, visibility: document.visibilityState });
-            showToast(title, 'info');
-            sendBrowserNotification(title, body);
+            const suppressMessageNotification = activeTabRef.current === 'chat';
+            console.debug('incoming message for current user', { title, body, suppressMessageNotification, Notification_permission: Notification.permission, visibility: document.visibilityState });
+            if (!suppressMessageNotification) {
+              showToast(title, 'info');
+              sendBrowserNotification(title, body);
+            }
 
-            const isViewing = chatActiveRecipient?.toLowerCase() === sender;
+            const isViewing = chatActiveRecipientRef.current?.toLowerCase() === sender;
             console.debug('realtime handling new message', { sender, receiver, currentUsername, isViewing, created_at: newMsg.created_at, cutoff: readCutoffsRef.current?.[sender] });
 
-            // Always increment unread for valid incoming messages when not viewing thread
-            if (!isViewing) {
+            // Keep the bell count visible in Chat, but suppress noisy toast notifications there.
+            if (!isViewing || activeTabRef.current === 'chat') {
               try {
                 const createdMs = Date.parse(newMsg.created_at || '') || Date.now();
                 const cutoffIso = readCutoffsRef.current?.[sender] || null;
@@ -653,9 +790,9 @@ export default function App() {
               setUserProfiles((prev) => ({
                 ...prev,
                 [updated.username.toLowerCase()]: {
-                  avatar_url: updated.avatar_url || prev[updated.username.toLowerCase()]?.avatar_url,
-                  last_seen_at: updated.last_seen_at,
-                  status: updated.status || prev[updated.username.toLowerCase()]?.status,
+                  avatar_url: updated.avatar_url ?? prev[updated.username.toLowerCase()]?.avatar_url,
+                  last_seen_at: updated.last_seen_at ?? prev[updated.username.toLowerCase()]?.last_seen_at,
+                  status: updated.status ?? prev[updated.username.toLowerCase()]?.status,
                 },
               }));
             }
@@ -667,12 +804,14 @@ export default function App() {
       .subscribe();
 
     return () => {
-      window.removeEventListener('focus', updateFocusSeen);
+      window.clearInterval(lastSeenInterval);
+      window.removeEventListener('focus', updateLastSeen);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       supabase.removeChannel(messagesChannel);
       supabase.removeChannel(followsChannel);
       supabase.removeChannel(profilesChannel);
     };
-  }, [nickname, chatActiveRecipient, sessionUser]);
+  }, [nickname]);
 
   useEffect(() => {
     updateUnreadCounts(chatMessages);
@@ -937,6 +1076,21 @@ export default function App() {
   const handleSendMessage = async (receiverUsername: string, bodyText: string) => {
     if (!nickname) return;
 
+    const tempId = `temp-msg-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const optimisticMsg: ChatMessage = {
+      id: tempId,
+      sender_username: nickname,
+      receiver_username: receiverUsername,
+      body: bodyText,
+      created_at: new Date().toISOString(),
+    };
+
+    setChatMessages((prev) => [...prev, optimisticMsg]);
+    setRecentActiveUsers((prev) => ({
+      ...prev,
+      [nickname.toLowerCase()]: optimisticMsg.created_at,
+    }));
+
     const newMsgObj = {
       sender_username: nickname,
       receiver_username: receiverUsername,
@@ -950,20 +1104,16 @@ export default function App() {
         .select()
         .single();
       if (error) throw error;
-      setChatMessages((prev) => [...prev, data]);
+      setChatMessages((prev) => {
+        if (prev.some((msg) => msg.id === data.id)) {
+          return prev.filter((msg) => msg.id !== tempId);
+        }
+        return prev.map((msg) => (msg.id === tempId ? data : msg));
+      });
     } catch {
-      // Fallback
-      const fakeMsg: ChatMessage = {
-        id: `temp-msg-${Date.now()}`,
-        sender_username: nickname,
-        receiver_username: receiverUsername,
-        body: bodyText,
-        created_at: new Date().toISOString(),
-      };
       const list = JSON.parse(localStorage.getItem('lunae_chat_messages') || '[]');
-      list.push(fakeMsg);
+      list.push(optimisticMsg);
       localStorage.setItem('lunae_chat_messages', JSON.stringify(list));
-      setChatMessages((prev) => [...prev, fakeMsg]);
       
       // Simulate reply from some users occasionally for amazing UX!
       setTimeout(() => {
@@ -1570,6 +1720,8 @@ export default function App() {
                   unreadCounts={unreadMessagesBySender}
                   readCutoffs={readCutoffs}
                   userStatuses={userProfiles}
+                  onlineUsers={chatPresenceUsers}
+                  recentActiveUsers={recentActiveUsers}
                 />
               </Suspense>
             </div>

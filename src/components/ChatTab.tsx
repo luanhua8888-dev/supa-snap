@@ -21,6 +21,8 @@ interface ChatTabProps {
   onSelectRecipient: (recipient: string | null) => void;
   unreadCounts: Record<string, number>;
   userStatuses: Record<string, { last_seen_at?: string; status?: string }>;
+  onlineUsers?: Record<string, boolean>;
+  recentActiveUsers?: Record<string, string>;
   readCutoffs?: Record<string, string>;
 }
 
@@ -34,12 +36,20 @@ export const ChatTab: React.FC<ChatTabProps> = ({
   onSelectRecipient,
   unreadCounts,
   userStatuses,
+  onlineUsers = {},
+  recentActiveUsers = {},
   readCutoffs,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [text, setText] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [nowTick, setNowTick] = useState(() => Date.now());
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setNowTick(Date.now()), 30000);
+    return () => window.clearInterval(interval);
+  }, []);
 
   // Auto scroll to bottom when messages or active recipient changes without scrolling the main viewport
   useEffect(() => {
@@ -89,7 +99,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
 
   // Last message and time for each partner
   const partnerDetails = useMemo(() => {
-    const details: Record<string, { lastMessage: string; lastTime: string; timestamp: number }> = {};
+    const details: Record<string, { lastMessage: string; lastTime: string; timestamp: number; inboundTimestamp: number }> = {};
     
     chatPartners.forEach((partner) => {
       const partnerMsgs = messages.filter((msg) => {
@@ -108,12 +118,16 @@ export const ChatTab: React.FC<ChatTabProps> = ({
           lastMessage: last.body,
           lastTime: timeStr,
           timestamp: date.getTime(),
+          inboundTimestamp: partnerMsgs
+            .filter((msg) => msg.sender_username.toLowerCase() === partner.toLowerCase())
+            .reduce((latest, msg) => Math.max(latest, Date.parse(msg.created_at || '') || 0), 0),
         };
       } else {
         details[partner.toLowerCase()] = {
           lastMessage: 'Chưa có tin nhắn. Bắt đầu trò chuyện! ✨',
           lastTime: '',
           timestamp: 0,
+          inboundTimestamp: 0,
         };
       }
     });
@@ -131,10 +145,44 @@ export const ChatTab: React.FC<ChatTabProps> = ({
   }, [chatPartners, partnerDetails]);
 
   // Filter messages for active thread
-  const getStatusText = (username: string) => {
+  const getLastSeenAgeMs = (username: string) => {
     const status = userStatuses[username.toLowerCase()];
-    if (!status?.last_seen_at) return 'Offline';
-    const ageMs = Date.now() - new Date(status.last_seen_at).getTime();
+    if (!status?.last_seen_at) return null;
+
+    const lastSeenMs = new Date(status.last_seen_at).getTime();
+    if (!Number.isFinite(lastSeenMs)) return null;
+
+    return Math.max(0, nowTick - lastSeenMs);
+  };
+
+  const isUserOnline = (username: string) => {
+    const usernameLower = username.toLowerCase();
+    if (onlineUsers[usernameLower]) return true;
+
+    const recentActiveAt = recentActiveUsers[usernameLower];
+    const recentActiveMs = recentActiveAt ? Date.parse(recentActiveAt) || 0 : 0;
+    if (recentActiveMs && nowTick - recentActiveMs < 120000) return true;
+
+    const inboundTimestamp = partnerDetails[usernameLower]?.inboundTimestamp || 0;
+    if (inboundTimestamp && nowTick - inboundTimestamp < 120000) return true;
+
+    const ageMs = getLastSeenAgeMs(username);
+    return ageMs !== null && ageMs >= 0 && ageMs < 120000;
+  };
+
+  const getStatusText = (username: string) => {
+    const usernameLower = username.toLowerCase();
+    if (onlineUsers[usernameLower]) return 'Online';
+
+    const recentActiveAt = recentActiveUsers[usernameLower];
+    const recentActiveMs = recentActiveAt ? Date.parse(recentActiveAt) || 0 : 0;
+    if (recentActiveMs && nowTick - recentActiveMs < 120000) return 'Online';
+
+    const inboundTimestamp = partnerDetails[usernameLower]?.inboundTimestamp || 0;
+    if (inboundTimestamp && nowTick - inboundTimestamp < 120000) return 'Online';
+
+    const ageMs = getLastSeenAgeMs(username);
+    if (ageMs === null) return 'Online';
     if (ageMs < 120000) return 'Online';
     const minutes = Math.max(1, Math.round(ageMs / 60000));
     if (minutes < 60) return `${minutes} phút trước`;
@@ -158,12 +206,14 @@ export const ChatTab: React.FC<ChatTabProps> = ({
     e.preventDefault();
     if (!text.trim() || !activeRecipient || isSending) return;
 
+    const messageText = text.trim();
     setIsSending(true);
+    setText('');
     try {
-      await onSendMessage(activeRecipient, text.trim());
-      setText('');
+      await onSendMessage(activeRecipient, messageText);
     } catch (err) {
       console.error('Lỗi gửi tin nhắn:', err);
+      setText(messageText);
     } finally {
       setIsSending(false);
     }
@@ -225,6 +275,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                 sortedPartners.map((partner) => {
                   const avatar = getPartnerAvatar(partner);
                   const detail = partnerDetails[partner.toLowerCase()];
+                  const online = isUserOnline(partner);
                   // debug partner/unread mapping
                   // eslint-disable-next-line no-console
                   console.debug('ChatTab partner render', partner, 'lower:', partner.toLowerCase(), 'unread:', unreadCounts[partner.toLowerCase()]);
@@ -246,6 +297,12 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                         ) : (
                           partner.substring(0, 2).toUpperCase()
                         )}
+                        <span
+                          className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-white dark:border-threads-bg ${
+                            online ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-zinc-700'
+                          }`}
+                          aria-hidden="true"
+                        />
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-2">
@@ -304,6 +361,12 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                 ) : (
                   (activeRecipient || '').substring(0, 2).toUpperCase()
                 )}
+                <span
+                  className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-white dark:border-threads-bg ${
+                    activeRecipient && isUserOnline(activeRecipient) ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-zinc-700'
+                  }`}
+                  aria-hidden="true"
+                />
               </div>
 
               <div className="flex-1 min-w-0">
@@ -356,6 +419,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                           ) : !isMine && !msg.read_at ? (
                             (() => {
                               const sender = msg.sender_username.toLowerCase();
+                              if (activeRecipient && sender === activeRecipient.toLowerCase()) return null;
                               const cutoff = readCutoffs?.[sender];
                               const createdMs = Date.parse(msg.created_at || '') || 0;
                               const cutoffMs = cutoff ? Date.parse(cutoff) || 0 : 0;

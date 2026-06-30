@@ -15,15 +15,42 @@
     <title>Lunæ</title>
   </head>
   <body>
+    <script>
+      if (
+        'serviceWorker' in navigator &&
+        ['localhost', '127.0.0.1'].includes(window.location.hostname) &&
+        !sessionStorage.getItem('supasnap_sw_dev_reset')
+      ) {
+        sessionStorage.setItem('supasnap_sw_dev_reset', '1');
+        navigator.serviceWorker.getRegistrations()
+          .then((registrations) => Promise.all(registrations.map((reg) => reg.unregister())))
+          .then(() => caches.keys())
+          .then((keys) => Promise.all(keys.map((key) => caches.delete(key))))
+          .then(() => {
+            if (navigator.serviceWorker.controller) {
+              window.location.reload();
+            }
+          })
+          .catch((err) => console.log('SW dev reset failed:', err));
+      }
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
-    <script>
-      // Register Service Worker for PWA
+    <script type="module">
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js')
-            .then((reg) => console.log('SW registered:', reg.scope))
-            .catch((err) => console.log('SW registration failed:', err));
+          if (import.meta.env.PROD) {
+            navigator.serviceWorker.register('/sw.js')
+              .then((reg) => console.log('SW registered:', reg.scope))
+              .catch((err) => console.log('SW registration failed:', err));
+            return;
+          }
+
+          navigator.serviceWorker.getRegistrations()
+            .then((registrations) => Promise.all(registrations.map((reg) => reg.unregister())))
+            .then(() => caches.keys())
+            .then((keys) => Promise.all(keys.map((key) => caches.delete(key))))
+            .catch((err) => console.log('SW cleanup failed:', err));
         });
       }
     </script>
