@@ -41,7 +41,7 @@ export function DetailVideoPlayer({ src, onLoaded }: DetailVideoPlayerProps) {
 
     const load = async () => {
       try {
-        const res = await fetch(src, { mode: 'cors', cache: 'force-cache' });
+        const res = await fetch(src, { mode: 'cors', cache: 'no-store' });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const blob = await res.blob();
         if (cancelled) return;

@@ -53,6 +53,14 @@ self.addEventListener('fetch', (event) => {
 
   if (event.request.method !== 'GET') return;
 
+  if (
+    event.request.destination === 'video' ||
+    event.request.headers.has('range') ||
+    /\.(mp4|webm|mov|m4v)(\?|$)/i.test(url.pathname)
+  ) {
+    return;
+  }
+
   if (url.pathname.includes('/auth/') || url.pathname.includes('/token')) return;
 
   if (url.origin !== self.location.origin) return;

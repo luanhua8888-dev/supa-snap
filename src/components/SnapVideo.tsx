@@ -142,7 +142,7 @@ export function SnapVideo({
         playsInline
         muted
         loop={loop}
-        preload="auto"
+        preload={shouldAutoplay ? 'auto' : 'metadata'}
         autoPlay={shouldAutoplay}
         className={`snap-video w-full h-full object-cover ${className}`}
         onPlay={() => {

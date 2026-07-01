@@ -21,11 +21,6 @@ export function GalleryThumb({ photo, live }: GalleryThumbProps) {
           preload="metadata"
           loop
           className="w-full h-full object-cover bg-zinc-900"
-          onLoadedData={(e) => {
-            const v = e.currentTarget;
-            v.muted = true;
-            if (v.paused) v.play().catch(() => undefined);
-          }}
         />
       ) : isVideo ? (
         <div className="w-full h-full bg-zinc-900 flex items-center justify-center">

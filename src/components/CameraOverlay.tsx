@@ -713,35 +713,44 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
           animate={{ y: 0 }}
           exit={{ y: '100%' }}
           transition={{ type: 'spring', damping: 25, stiffness: 220 }}
-          className="absolute inset-0 z-50 bg-[#101010] flex flex-col overflow-hidden min-h-0"
+          className="absolute inset-0 z-50 flex min-h-0 flex-col overflow-hidden bg-[#08090b] text-white"
         >
+          <div className="pointer-events-none absolute inset-x-0 top-0 z-0 h-56 bg-[radial-gradient(circle_at_50%_0%,rgba(14,165,233,0.22),transparent_56%)]" />
           {/* Top Bar Header */}
-          <div className="flex items-center justify-between px-4 py-3 z-10 text-white flex-shrink-0">
+          <div className="relative z-10 flex flex-shrink-0 items-center justify-between px-4 pb-3 pt-4 safe-area-pt">
             <motion.button
-              whileHover={{ scale: 1.08 }}
-              whileTap={{ scale: 0.92 }}
+              whileHover={{ scale: 1.04 }}
+              whileTap={{ scale: 0.96 }}
               onClick={handleClose}
-              className="p-2.5 rounded-full bg-white/10 hover:bg-white/15 border border-white/5 transition-colors cursor-pointer"
+              className="flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/[0.08] text-white/85 shadow-lg shadow-black/20 backdrop-blur-xl transition-colors hover:bg-white/[0.14] cursor-pointer"
               aria-label="Close"
             >
               <X className="w-4.5 h-4.5" />
             </motion.button>
             
-            <div className="flex-1 text-center">
-              {previewUrl && (
-                <span className="font-rounded font-extrabold text-[15px] text-slate-200 flex items-center justify-center gap-2 uppercase tracking-wider">
-                  <Sparkles className="w-4 h-4 text-sky-300 animate-pulse" />
-                  Review
-                </span>
-              )}
+            <div className="flex min-w-0 flex-1 flex-col items-center px-3 text-center">
+              <div className="flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.18em] text-white/45">
+                <Sparkles className="w-3.5 h-3.5 text-cyan-300" />
+                <span>Snap Studio</span>
+              </div>
+              <div className="mt-0.5 max-w-[220px] truncate text-sm font-extrabold text-white">
+                {previewUrl ? 'Review & polish' : captureMode === 'video' ? 'Record video' : 'Take a snap'}
+              </div>
             </div>
 
-            <div className="w-10" />
+            <button
+              type="button"
+              onClick={triggerFileSelect}
+              className="flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/[0.08] text-white/85 shadow-lg shadow-black/20 backdrop-blur-xl transition-colors hover:bg-white/[0.14] cursor-pointer"
+              aria-label="Upload from gallery"
+            >
+              <ImageIcon className="w-4.5 h-4.5" />
+            </button>
           </div>
 
           {/* Scrollable body — tránh đẩy nút Đăng ra ngoài màn hình */}
-          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden no-scrollbar">
-          <div className={`relative flex flex-col items-center ${previewUrl ? '' : 'justify-center'} bg-[#101010] px-4 py-2`}>
+          <div className="relative z-10 flex-1 min-h-0 overflow-y-auto overflow-x-hidden no-scrollbar">
+          <div className={`relative flex min-h-full flex-col items-center ${previewUrl ? '' : 'justify-center'} px-4 pb-4 pt-1`}>
             {/* Flash Effect */}
             <AnimatePresence>
               {showFlash && (
@@ -756,8 +765,8 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
 
             {/* Viewfinder Aspect Wrapper */}
             <div
-              className={`relative w-full aspect-square rounded-[2rem] overflow-hidden border-2 border-white/10 shadow-2xl bg-zinc-900 shrink-0 ${
-                previewUrl ? 'max-w-[min(280px,88vw)]' : 'max-w-[min(340px,92vw)]'
+              className={`snap-preview-frame relative w-full aspect-square overflow-hidden bg-zinc-950 shrink-0 ${
+                previewUrl ? 'max-w-[min(360px,92vw)]' : 'max-w-[min(390px,94vw)]'
               }`}
             >
               
@@ -796,10 +805,19 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
               {!previewUrl &&
                 (cameraError ? (
                   <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-6 space-y-4">
-                    <Camera className="w-12 h-12 text-sky-300 animate-pulse" />
-                    <p className="text-xs text-zinc-400 max-w-[200px] leading-relaxed font-rounded">
+                    <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.06]">
+                      <Camera className="w-8 h-8 text-cyan-300" />
+                    </div>
+                    <p className="text-xs text-zinc-300 max-w-[230px] leading-relaxed font-rounded">
                       {cameraError}
                     </p>
+                    <button
+                      type="button"
+                      onClick={triggerFileSelect}
+                      className="rounded-xl bg-white px-4 py-2 text-xs font-extrabold text-zinc-950 cursor-pointer"
+                    >
+                      Chon tu thu vien
+                    </button>
                   </div>
                 ) : (
                   <video
@@ -833,15 +851,15 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
                 <motion.div
                   initial={{ opacity: 0, y: -10 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="absolute top-4 left-4 z-20 flex items-center space-x-2 bg-black/60 backdrop-blur-md border border-white/15 px-3 py-1.5 rounded-full text-white text-[10px] font-bold font-rounded"
+                  className="absolute top-4 left-4 z-20 flex max-w-[78%] items-center space-x-2 rounded-full border border-white/15 bg-black/55 px-3 py-1.5 text-[10px] font-bold text-white shadow-lg backdrop-blur-md font-rounded"
                 >
-                  <Music className="w-3.5 h-3.5 text-sky-300 animate-bounce" />
+                  <Music className="w-3.5 h-3.5 text-cyan-300" />
                   <span className="truncate max-w-[120px]">{selectedSong.title} - {selectedSong.artist}</span>
                 </motion.div>
               )}
 
               {isRecording && (
-                <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 bg-red-500/90 backdrop-blur-md px-3 py-1.5 rounded-full border border-red-300/40">
+                <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 rounded-full border border-red-300/40 bg-red-500/90 px-3 py-1.5 shadow-lg backdrop-blur-md">
                   <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
                   <span className="text-[10px] font-extrabold text-white font-rounded">
                     REC {recordSeconds}s / {MAX_VIDEO_SECONDS}s
@@ -856,10 +874,10 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
                 <button
                   type="button"
                   onClick={() => setIsMusicDrawerOpen(true)}
-                  className={`inline-flex items-center gap-2 px-4 py-2 rounded-2xl border transition-all duration-200 text-sm font-semibold ${
+                  className={`inline-flex max-w-full items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold shadow-lg shadow-black/15 transition-all duration-200 ${
                     selectedSong
-                      ? 'bg-sky-500/15 text-sky-200 border-sky-400 shadow-[0_12px_30px_rgba(56,189,248,0.18)]'
-                      : 'bg-white/5 text-slate-200 border-white/10 hover:bg-white/10'
+                      ? 'bg-cyan-400/15 text-cyan-100 border-cyan-300/45'
+                      : 'bg-white/[0.07] text-slate-200 border-white/10 hover:bg-white/[0.12]'
                   }`}
                 >
                   <Music className="w-4 h-4" />
@@ -889,7 +907,7 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
                   type="button"
                   disabled={draftIndex <= 0 || isUploading}
                   onClick={() => setDraftIndex((i) => Math.max(0, i - 1))}
-                  className="p-2 rounded-xl bg-white/10 border border-white/15 disabled:opacity-30 cursor-pointer"
+                  className="p-2 rounded-xl bg-white/[0.08] border border-white/10 disabled:opacity-30 cursor-pointer"
                   aria-label="Ảnh trước"
                 >
                   <ChevronLeft className="w-4 h-4 text-white" />
@@ -904,7 +922,7 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
                         setSelectedStickerId(null);
                       }}
                       className={`shrink-0 w-11 h-11 rounded-lg overflow-hidden border-2 cursor-pointer ${
-                        i === draftIndex ? 'border-sky-400 ring-2 ring-sky-400/40' : 'border-white/20'
+                        i === draftIndex ? 'border-cyan-300 ring-2 ring-cyan-300/35' : 'border-white/20'
                       }`}
                     >
                       {d.mediaType === 'video' ? (
@@ -919,7 +937,7 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
                   type="button"
                   disabled={draftIndex >= drafts.length - 1 || isUploading}
                   onClick={() => setDraftIndex((i) => Math.min(drafts.length - 1, i + 1))}
-                  className="p-2 rounded-xl bg-white/10 border border-white/15 disabled:opacity-30 cursor-pointer"
+                  className="p-2 rounded-xl bg-white/[0.08] border border-white/10 disabled:opacity-30 cursor-pointer"
                   aria-label="Ảnh sau"
                 >
                   <ChevronRight className="w-4 h-4 text-white" />
@@ -928,7 +946,7 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
             )}
 
             {previewUrl && (
-              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
+              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mt-3 w-full max-w-[390px] rounded-2xl border border-white/10 bg-white/[0.045] p-3 shadow-xl shadow-black/20 backdrop-blur-xl">
                 <StickerPicker
                   stickers={currentStickers}
                   onAdd={(s) => setCurrentStickers([...currentStickers, s])}
@@ -955,10 +973,10 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
                 <button
                   type="button"
                   onClick={() => setIsMusicDrawerOpen(true)}
-                  className={`w-full max-w-[370px] mx-auto mt-2 flex items-center justify-center gap-2 py-2 rounded-xl text-[11px] font-extrabold font-rounded border cursor-pointer ${
+                  className={`w-full mx-auto mt-2 flex items-center justify-center gap-2 py-2.5 rounded-xl text-[11px] font-extrabold font-rounded border cursor-pointer ${
                     selectedSong
-                      ? 'bg-sky-500/20 text-sky-200 border-sky-400/40'
-                      : 'bg-white/5 text-zinc-400 border-white/10'
+                      ? 'bg-cyan-400/15 text-cyan-100 border-cyan-300/40'
+                      : 'bg-white/[0.06] text-zinc-300 border-white/10'
                   }`}
                 >
                   <Music className="w-3.5 h-3.5" />
@@ -991,17 +1009,17 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
           />
 
           {/* Bottom — luôn cố định dưới cùng */}
-          <div className="px-4 pt-4 pb-6 z-20 bg-[#101010]/95 backdrop-blur-md border-t border-white/10 flex-shrink-0 safe-area-pb">
+          <div className="relative z-20 flex-shrink-0 border-t border-white/10 bg-[#08090b]/92 px-4 pb-6 pt-3 shadow-[0_-18px_60px_rgba(0,0,0,0.38)] backdrop-blur-xl safe-area-pb">
             {!previewUrl && !cameraError && (
               <div className="flex justify-center mb-4">
-                <div className="flex p-1 rounded-2xl bg-white/8 border border-white/10">
+                <div className="flex rounded-full border border-white/10 bg-white/[0.06] p-1 shadow-lg shadow-black/15">
                   <button
                     type="button"
                     onClick={() => setCaptureMode('photo')}
                     disabled={isRecording}
-                    className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-[11px] font-extrabold font-rounded transition-all cursor-pointer ${
+                    className={`flex items-center gap-1.5 rounded-full px-4 py-2 text-[11px] font-extrabold transition-all cursor-pointer font-rounded ${
                       captureMode === 'photo'
-                        ? 'bg-sky-500 text-white shadow-md'
+                        ? 'bg-white text-zinc-950 shadow-md'
                         : 'text-zinc-400 hover:text-white'
                     }`}
                   >
@@ -1012,9 +1030,9 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
                     type="button"
                     onClick={() => setCaptureMode('video')}
                     disabled={isRecording}
-                    className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-[11px] font-extrabold font-rounded transition-all cursor-pointer ${
+                    className={`flex items-center gap-1.5 rounded-full px-4 py-2 text-[11px] font-extrabold transition-all cursor-pointer font-rounded ${
                       captureMode === 'video'
-                        ? 'bg-sky-500 text-white shadow-md'
+                        ? 'bg-white text-zinc-950 shadow-md'
                         : 'text-zinc-400 hover:text-white'
                     }`}
                   >
@@ -1026,13 +1044,13 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
             )}
 
             {previewUrl ? (
-              <div className="flex items-center gap-2.5 w-full max-w-[370px] mx-auto">
+              <div className="flex items-center gap-2.5 w-full max-w-[390px] mx-auto">
                 <motion.button
                   id="camera-retake-btn"
                   whileTap={{ scale: 0.97 }}
                   onClick={resetCameraState}
                   disabled={isUploading}
-                  className="shrink-0 w-11 h-11 bg-white/10 hover:bg-white/15 rounded-xl text-white border border-white/15 flex items-center justify-center cursor-pointer disabled:opacity-50"
+                  className="shrink-0 w-12 h-12 bg-white/[0.08] hover:bg-white/[0.14] rounded-2xl text-white border border-white/10 flex items-center justify-center cursor-pointer disabled:opacity-50"
                   title="Chụp lại"
                 >
                   <RotateCcw className="w-5 h-5 text-zinc-300" />
@@ -1043,7 +1061,7 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
                   whileTap={{ scale: 0.98 }}
                   onClick={handleUploadSubmit}
                   disabled={isUploading || !canPost}
-                  className="flex-1 min-h-[44px] max-h-[44px] rounded-xl font-rounded font-extrabold text-sm flex items-center justify-center gap-2 cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed bg-gradient-to-br from-sky-600 via-sky-500 to-indigo-700 text-white shadow-[0_4px_20px_rgba(56,189,248,0.35)] border border-sky-300/25 active:scale-[0.98] transition-transform"
+                  className="flex-1 min-h-[48px] max-h-[48px] rounded-2xl font-rounded font-extrabold text-sm flex items-center justify-center gap-2 cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed bg-white text-zinc-950 shadow-[0_14px_34px_rgba(255,255,255,0.14)] border border-white/40 active:scale-[0.98] transition-transform"
                 >
                   {isUploading ? (
                     <div className="flex items-center gap-2">
@@ -1063,22 +1081,13 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
                 </motion.button>
               </div>
             ) : (
-              <div className="flex items-center justify-between px-4 max-w-[420px] mx-auto">
-                <motion.button
-                  id="camera-gallery-btn"
-                  whileHover={{ scale: 1.08 }}
-                  whileTap={{ scale: 0.92 }}
-                  onClick={triggerFileSelect}
-                  className="p-3 bg-white/10 hover:bg-white/15 rounded-full text-white border border-white/5 cursor-pointer"
-                  aria-label="Upload from gallery"
-                >
-                  <ImageIcon className="w-5 h-5 text-zinc-300" />
-                </motion.button>
+              <div className="grid grid-cols-[64px_1fr_64px] items-center px-3 max-w-[420px] mx-auto">
+                <div />
 
                 <div className="relative flex items-center justify-center">
                   <div
                     className={`absolute w-[96px] h-[96px] rounded-full border pointer-events-none ${
-                      isRecording ? 'border-red-500 animate-pulse' : 'border-sky-500/60 shutter-pulse'
+                      isRecording ? 'border-red-500 animate-pulse' : 'border-white/25 shutter-pulse'
                     }`}
                   />
 
@@ -1088,7 +1097,7 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
                     whileTap={{ scale: 0.9 }}
                     onClick={handleShutter}
                     disabled={!!cameraError}
-                    className={`w-20 h-20 rounded-full border-4 flex items-center justify-center p-1 transition-all z-10 cursor-pointer ${
+                    className={`w-20 h-20 rounded-full border-[3px] flex items-center justify-center p-1.5 transition-all z-10 cursor-pointer shadow-[0_16px_44px_rgba(0,0,0,0.34)] ${
                       cameraError ? 'opacity-40 cursor-not-allowed border-white' : ''
                     } ${
                       captureMode === 'video'
@@ -1108,7 +1117,7 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
                         }`}
                       />
                     ) : (
-                      <div className="w-12 h-12 bg-white rounded-full hover:bg-slate-200 transition-colors" />
+                      <div className="w-12 h-12 bg-white rounded-full hover:bg-slate-200 transition-colors shadow-inner" />
                     )}
                   </motion.button>
                 </div>
@@ -1119,10 +1128,10 @@ export const CameraOverlay: React.FC<CameraOverlayProps> = ({
                   whileTap={{ scale: 0.92 }}
                   onClick={toggleCamera}
                   disabled={!!cameraError}
-                  className={`p-3 rounded-full text-white border border-white/5 cursor-pointer transition-all ${
+                  className={`justify-self-end p-3 rounded-full text-white border border-white/10 cursor-pointer transition-all ${
                     cameraError
                       ? 'opacity-40 pointer-events-none bg-white/5'
-                      : 'bg-white/10 hover:bg-white/15'
+                      : 'bg-white/[0.08] hover:bg-white/[0.14]'
                   } ${!hasMultipleCameras && !cameraError ? 'ring-1 ring-white/10' : ''}`}
                   aria-label={facingMode === 'user' ? 'Chuyển camera sau' : 'Chuyển camera trước'}
                   title={facingMode === 'user' ? 'Camera sau' : 'Camera trước'}

@@ -4,9 +4,6 @@ import react from '@vitejs/plugin-react'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
-  experimental: {
-    bundledDev: true,
-  },
   build: {
     target: 'es2022', // Output modern JS which is faster to parse and smaller
     cssCodeSplit: true, // Split CSS to load CSS only for needed chunks

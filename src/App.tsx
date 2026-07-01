@@ -35,6 +35,8 @@ const ChatTab = lazy(() => import('./components/ChatTab').then(m => ({ default: 
 const AuthModal = lazy(() => import('./components/AuthModal').then(m => ({ default: m.AuthModal })));
 const ConfirmDialog = lazy(() => import('./components/ConfirmDialog').then(m => ({ default: m.ConfirmDialog })));
 
+const INITIAL_FEED_LIMIT = 30;
+
 export default function App() {
   const [sessionUser, setSessionUser] = useState<any>(null);
   const [nickname, setNickname] = useState<string | null>(null);
@@ -276,11 +278,17 @@ export default function App() {
     };
   }, [sessionUser, nickname, followingList]);
 
-  const fetchComments = async () => {
+  const fetchComments = async (photoIds: string[]) => {
+    if (photoIds.length === 0) {
+      setCommentsByPhoto({});
+      return;
+    }
+
     try {
       const { data, error } = await supabase
         .from('comments')
         .select('*')
+        .in('photo_id', photoIds)
         .order('created_at', { ascending: true });
 
       if (error) {
@@ -1161,13 +1169,15 @@ export default function App() {
       const { data, error } = await supabase
         .from('photos')
         .select('*')
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .limit(INITIAL_FEED_LIMIT);
 
       if (error) {
         throw error;
       }
-      setPhotos(data || []);
-      await fetchComments();
+      const nextPhotos = data || [];
+      setPhotos(nextPhotos);
+      await fetchComments(nextPhotos.map((photo) => photo.id));
       await fetchUserAvatars();
     } catch (err: any) {
       console.error('Error fetching photos:', err);
@@ -2077,14 +2087,16 @@ export default function App() {
           </div>
         </div>
         {/* Camera sheet popup */}
-        <Suspense fallback={null}>
-          <CameraOverlay
-            isOpen={isCameraOpen}
-            onClose={() => setIsCameraOpen(false)}
-            onUpload={handlePhotoUpload}
-            isUploading={isUploading}
-          />
-        </Suspense>
+        {isCameraOpen && (
+          <Suspense fallback={null}>
+            <CameraOverlay
+              isOpen={isCameraOpen}
+              onClose={() => setIsCameraOpen(false)}
+              onUpload={handlePhotoUpload}
+              isUploading={isUploading}
+            />
+          </Suspense>
+        )}
 
         {/* Authentication Modal */}
         {photoToDelete && (
@@ -2100,12 +2112,14 @@ export default function App() {
           </Suspense>
         )}
 
-        <Suspense fallback={null}>
-          <AuthModal
-            isOpen={isAuthModalOpen}
-            onClose={() => setIsAuthModalOpen(false)}
-          />
-        </Suspense>
+        {isAuthModalOpen && (
+          <Suspense fallback={null}>
+            <AuthModal
+              isOpen={isAuthModalOpen}
+              onClose={() => setIsAuthModalOpen(false)}
+            />
+          </Suspense>
+        )}
 
         {/* Cute Toast notification popup */}
         <AnimatePresence>
